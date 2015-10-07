@@ -136,6 +136,8 @@ struct vdagent_x11 {
     int xrandr_minor;
     int has_xinerama;
     int dont_send_guest_xorg_res;
+
+    gboolean seamless_mode;
 };
 
 extern int (*vdagent_x11_prev_error_handler)(Display *, XErrorEvent *);
@@ -151,5 +153,9 @@ int vdagent_x11_randr_handle_event(struct vdagent_x11 *x11,
 void vdagent_x11_set_error_handler(struct vdagent_x11 *x11,
     int (*handler)(Display *, XErrorEvent *));
 int vdagent_x11_restore_error_handler(struct vdagent_x11 *x11);
+int vdagent_x11_debug_error_handler(Display *display, XErrorEvent *error);
+int vdagent_x11_ignore_bad_window_handler(Display *display, XErrorEvent *error);
+
+void vdagent_x11_seamless_mode_send_list(struct vdagent_x11 *x11);
 
 #endif // VDAGENT_X11_PRIV

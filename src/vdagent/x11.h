@@ -50,4 +50,7 @@ void vdagent_x11_client_disconnected(struct vdagent_x11 *x11);
 
 int vdagent_x11_has_icons_on_desktop(struct vdagent_x11 *x11);
 
+void vdagent_x11_set_seamless_mode(struct vdagent_x11 *x11,
+    VDAgentSeamlessMode *msg);
+
 #endif

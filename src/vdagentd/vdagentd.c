@@ -130,7 +130,7 @@ static void send_capabilities(struct vdagent_virtio_port *vport,
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_GUEST_LINEEND_LF);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MAX_CLIPBOARD);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_AUDIO_VOLUME_SYNC);
-    virtio_msg_uint32_to_le((uint8_t *)caps, size, 0);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_SEAMLESS_MODE);
 
     vdagent_virtio_port_write(vport, VDP_CLIENT_PORT,
                               VD_AGENT_ANNOUNCE_CAPABILITIES, 0,
@@ -370,6 +370,20 @@ static void do_client_file_xfer(struct vdagent_virtio_port *vport,
     udscs_write(conn, msg_type, 0, 0, data, message_header->size);
 }
 
+static void do_seamless_mode(struct vdagent_virtio_port *vport,
+                             VDAgentMessage *message_header,
+                             uint8_t *data)
+{
+  if (active_session_conn == NULL) {
+      syslog(LOG_DEBUG, "Could not find an agent connection belonging to the "
+                        "active session, ignoring seamless mode request");
+      return;
+  }
+
+  udscs_write(active_session_conn, VDAGENTD_SEAMLESS_MODE, 0, 0,
+              data, message_header->size);
+}
+
 static gsize vdagent_message_min_size[] =
 {
     -1, /* Does not exist */
@@ -388,6 +402,8 @@ static gsize vdagent_message_min_size[] =
     0, /* VD_AGENT_CLIENT_DISCONNECTED */
     sizeof(VDAgentMaxClipboard), /* VD_AGENT_MAX_CLIPBOARD */
     sizeof(VDAgentAudioVolumeSync), /* VD_AGENT_AUDIO_VOLUME_SYNC */
+    sizeof(VDAgentSeamlessMode), /* VD_AGENT_SEAMLESS_MODE */
+    sizeof(VDAgentSeamlessModeList), /* VD_AGENT_SEAMLESS_MODE_LIST */
 };
 
 static void vdagent_message_clipboard_from_le(VDAgentMessage *message_header,
@@ -472,6 +488,7 @@ static gboolean vdagent_message_check_size(const VDAgentMessage *message_header)
     case VD_AGENT_CLIPBOARD_GRAB:
     case VD_AGENT_AUDIO_VOLUME_SYNC:
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
+    case VD_AGENT_SEAMLESS_MODE:
         if (message_header->size < min_size) {
             syslog(LOG_ERR, "read: invalid message size: %u for message type: %u",
                    message_header->size, message_header->type);
@@ -553,6 +570,9 @@ static int virtio_port_read_complete(
         do_client_volume_sync(vport, port_nr, message_header, vdata);
         break;
     }
+    case VD_AGENT_SEAMLESS_MODE:
+        do_seamless_mode(vport, message_header, data);
+        break;
     default:
         g_warn_if_reached();
     }
@@ -918,6 +938,11 @@ static void agent_read_complete(struct udscs_connection **connp,
             g_hash_table_remove(active_xfers, GUINT_TO_POINTER(status.id));
         break;
     }
+    case VDAGENTD_SEAMLESS_MODE_LIST:
+        vdagent_virtio_port_write(virtio_port, VDP_CLIENT_PORT,
+                                  VD_AGENT_SEAMLESS_MODE_LIST, 0,
+                                  data, header->size);
+        break;
 
     default:
         syslog(LOG_ERR, "unknown message from vdagent: %u, ignoring",

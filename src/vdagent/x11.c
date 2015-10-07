@@ -74,7 +74,7 @@ static const char *vdagent_x11_sel_to_str(uint8_t selection) {
     }
 }
 
-static int vdagent_x11_debug_error_handler(
+int vdagent_x11_debug_error_handler(
     Display *display, XErrorEvent *error)
 {
     abort();
@@ -82,7 +82,7 @@ static int vdagent_x11_debug_error_handler(
 
 /* With the clipboard we're sometimes dealing with Properties on another apps
    Window. which can go away at any time. */
-static int vdagent_x11_ignore_bad_window_handler(
+int vdagent_x11_ignore_bad_window_handler(
     Display *display, XErrorEvent *error)
 {
     if (error->error_code == BadWindow)
@@ -286,6 +286,11 @@ struct vdagent_x11 *vdagent_x11_create(struct udscs_connection *vdagentd,
     if (x11->debug && x11->net_wm_name)
         syslog(LOG_DEBUG, "net_wm_name: \"%s\", has icons: %d",
                x11->net_wm_name, vdagent_x11_has_icons_on_desktop(x11));
+
+    /* Catch all windows changes due to seamless mode. */
+    XSelectInput(x11->display, DefaultRootWindow(x11->display),
+                 SubstructureNotifyMask);
+    vdagent_x11_seamless_mode_send_list(x11);
 
     /* Flush output buffers and consume any pending events */
     vdagent_x11_do_read(x11);
@@ -511,14 +516,28 @@ static void vdagent_x11_handle_event(struct vdagent_x11 *x11, XEvent event)
         for (i = 0; i < x11->screen_count; i++)
             if (event.xconfigure.window == x11->root_window[i])
                 break;
-        if (i == x11->screen_count)
-            break;
+        if (i != x11->screen_count) {
+            vdagent_x11_randr_handle_root_size_change(x11, i,
+                    event.xconfigure.width, event.xconfigure.height);
+        }
+
+        vdagent_x11_seamless_mode_send_list(x11);
 
         handled = 1;
-        vdagent_x11_randr_handle_root_size_change(x11, i,
-                event.xconfigure.width, event.xconfigure.height);
         break;
     case MappingNotify:
+    case CreateNotify:
+    case CirculateNotify:
+    case DestroyNotify:
+    case GravityNotify:
+    case MapNotify:
+    case ReparentNotify:
+    case UnmapNotify:
+        vdagent_x11_seamless_mode_send_list(x11);
+
+        handled = 1;
+        break;
+    case ClientMessage:
         /* These are uninteresting */
         handled = 1;
         break;
@@ -541,6 +560,9 @@ static void vdagent_x11_handle_event(struct vdagent_x11 *x11, XEvent event)
         }
         /* Always mark as handled, since we cannot unselect input for property
            notifications once we are done with handling the incr transfer. */
+
+        vdagent_x11_seamless_mode_send_list(x11);
+
         handled = 1;
         break;
     case SelectionClear:
@@ -1353,4 +1375,11 @@ int vdagent_x11_has_icons_on_desktop(struct vdagent_x11 *x11)
                 return 1;
 
     return 0;
+}
+
+void vdagent_x11_set_seamless_mode(struct vdagent_x11 *x11,
+                                   VDAgentSeamlessMode *msg)
+{
+  x11->seamless_mode = msg->enabled;
+  vdagent_x11_seamless_mode_send_list(x11);
 }

@@ -137,6 +137,9 @@ static void daemon_read_complete(struct udscs_connection **connp,
                                                            fx_open_dir, debug);
         }
         break;
+    case VDAGENTD_SEAMLESS_MODE:
+        vdagent_x11_set_seamless_mode(x11, (VDAgentSeamlessMode *)data);
+        break;
     default:
         syslog(LOG_ERR, "Unknown message from vdagentd type: %d, ignoring",
                header->type);

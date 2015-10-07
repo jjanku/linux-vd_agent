@@ -35,6 +35,7 @@ src_spice_vdagent_SOURCES =			\
 	src/vdagent/file-xfers.h		\
 	src/vdagent/x11-priv.h			\
 	src/vdagent/x11-randr.c			\
+	src/vdagent/x11-seamless-mode.c		\
 	src/vdagent/x11.c			\
 	src/vdagent/x11.h			\
 	src/vdagent/vdagent.c			\
