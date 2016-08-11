@@ -26,17 +26,11 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <syslog.h>
+#include <spice/vd_agent.h>
 
 #include "vdagentd-proto.h"
 #include "x11.h"
 #include "x11-priv.h"
-
-typedef struct spice_window {
-    gint x;
-    gint y;
-    guint w;
-    guint h;
-} SpiceWindow;
 
 /* Get window property. */
 static gulong
@@ -134,7 +128,7 @@ get_window_type(Display *display, Window window)
 
 static void
 get_geometry(Display *display, Window window,
-             gint *x, gint *y, guint *w, guint *h)
+             VDAgentSeamlessModeWindow *geometry)
 {
     guchar *data = NULL;
     gulong *extents;
@@ -143,25 +137,25 @@ get_geometry(Display *display, Window window,
     guint border, depth;
     XWindowAttributes attributes;
 
-    XGetGeometry(display, window, &root, x, y, w, h, &border, &depth);
+    XGetGeometry(display, window, &root, &geometry->x, &geometry->y, &geometry->w, &geometry->h, &border, &depth);
     XTranslateCoordinates(display, window, root, -border, -border,
                            &x_abs, &y_abs, &child);
     XGetWindowAttributes(display, window, &attributes);
 
     /* Change relative to absolute mapping (e.g. gnome-terminal, firefox). */
-    if (x_abs != *x || y_abs != *y) {
-        *x = x_abs - *x + attributes.x;
-        *y = y_abs - *y + attributes.y;
+    if (x_abs != geometry->x || y_abs != geometry->y) {
+        geometry->x = x_abs - geometry->x + attributes.x;
+        geometry->y = y_abs - geometry->y + attributes.y;
     }
 
     /* Remove WM border (e.g. gnome-terminal, firefox). */
     if (get_window_property(display, window, "_NET_FRAME_EXTENTS",
                             XA_CARDINAL, 32, &data) == 4) {
         extents = (gulong *)data; /* left, right, top, bottom */
-        *x -= extents[0];
-        *y -= extents[2];
-        *w += extents[0] + extents[1];
-        *h += extents[2] + extents[3];
+        geometry->x -= extents[0];
+        geometry->y -= extents[2];
+        geometry->w += extents[0] + extents[1];
+        geometry->h += extents[2] + extents[3];
 
         XFree(data);
     }
@@ -170,10 +164,10 @@ get_geometry(Display *display, Window window,
     if (get_window_property(display, window, "_GTK_FRAME_EXTENTS",
                             XA_CARDINAL, 32, &data) == 4) {
         extents = (gulong *)data; /* left, right, top, bottom */
-        *x += extents[0];
-        *y += extents[2];
-        *w -= extents[0] + extents[1];
-        *h -= extents[2] + extents[3];
+        geometry->x += extents[0];
+        geometry->y += extents[2];
+        geometry->w -= extents[0] + extents[1];
+        geometry->h -= extents[2] + extents[3];
 
         XFree(data);
     }
@@ -223,13 +217,11 @@ get_window_list(struct vdagent_x11 *x11, Window window)
     if (XQueryTree(x11->display, window, &root, &parent, &list, &n)) {
         guint i;
         for (i = 0; i < n; ++i) {
-            SpiceWindow *spice_window;
+            VDAgentSeamlessModeWindow *spice_window;
 
             if (is_visible(x11->display, list[i])) {
-                spice_window = g_new0(SpiceWindow, 1);
-                get_geometry(x11->display, list[i],
-                             &spice_window->x, &spice_window->y,
-                             &spice_window->w, &spice_window->h);
+                spice_window = g_new0(VDAgentSeamlessModeWindow, 1);
+                get_geometry(x11->display, list[i], spice_window);
 
                 if (vdagent_x11_restore_error_handler(x11) != 0) {
                     vdagent_x11_set_error_handler(x11,
@@ -271,7 +263,7 @@ vdagent_x11_seamless_mode_send_list(struct vdagent_x11 *x11)
     list = g_malloc0(size);
 
     for (l = window_list; l != NULL; l = l->next) {
-        SpiceWindow *window;
+        VDAgentSeamlessModeWindow *window;
 
         window = l->data;
         list->windows[list->num_of_windows].x = window->x;
