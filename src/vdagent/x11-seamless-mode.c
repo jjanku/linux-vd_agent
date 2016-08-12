@@ -67,46 +67,6 @@ get_window_property(Display *display, Window window,
     return 0;
 }
 
-/* Get current desktop number, or -1. */
-static gint
-get_current_desktop(Display *display)
-{
-    guchar *data = NULL;
-    Window root;
-
-    root = DefaultRootWindow(display);
-    if (get_window_property(display, root, "_NET_CURRENT_DESKTOP",
-                            XA_CARDINAL, 32, &data) == 1) {
-        gulong current;
-
-        current = *(gulong *)data;
-        XFree(data);
-
-        return (gint)current;
-    }
-
-    return -1;
-}
-
-/* Get window desktop number, or -1. */
-static gint
-get_desktop(Display *display, Window window)
-{
-    guchar *data = NULL;
-
-    if (get_window_property(display, window, "_NET_WM_DESKTOP",
-                            XA_CARDINAL, 32, &data) == 1) {
-        gulong desktop;
-
-        desktop = *(gulong *)data;
-        XFree(data);
-
-        return (gint)desktop;
-    }
-
-    return -1;
-}
-
 /* Get window type, or None. */
 static Atom
 get_window_type(Display *display, Window window)
@@ -124,6 +84,28 @@ get_window_type(Display *display, Window window)
     }
 
     return None;
+}
+
+static gboolean
+filter_window_type(Display *display, Atom atom)
+{
+    unsigned int list_size;
+    Atom filter_atom;
+
+    static const char *blacklist[] = {
+        "_NET_WM_WINDOW_TYPE_DESKTOP"
+        };
+
+    list_size = sizeof(blacklist)/sizeof(blacklist[0]);
+
+    for (int i = 0; i < list_size; i++) {
+        filter_atom = XInternAtom(display, blacklist[i], 0);
+
+        if (filter_atom == atom)
+            return FALSE;
+    }
+
+    return TRUE;
 }
 
 static void
@@ -177,7 +159,7 @@ get_geometry(Display *display, Window window,
 static gboolean
 is_visible(Display *display, Window window)
 {
-    Atom atom, type;
+    Atom type;
     XWindowAttributes attributes;
 
     /* Visible window must have window type specified. */
@@ -185,15 +167,8 @@ is_visible(Display *display, Window window)
     if (type == None)
         return FALSE;
 
-    /* Window must be on current desktop if it isn't popup menu. */
-    atom = XInternAtom(display, "_NET_WM_WINDOW_TYPE_POPUP_MENU", 0);
-    if (type != atom) {
-        gint current;
-
-        current = get_current_desktop(display);
-        if (get_desktop(display, window) != current)
-            return FALSE;
-    }
+    if (!filter_window_type(display, type))
+        return FALSE;
 
     /* Window must be viewable. */
     XGetWindowAttributes(display, window, &attributes);
