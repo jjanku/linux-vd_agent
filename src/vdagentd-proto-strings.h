@@ -37,6 +37,7 @@ static const char * const vdagentd_messages[] = {
         "file xfer disable",
         "seamless mode",
         "seamless mode list",
+        "seamless mode change",
         "client disconnected",
 };
 

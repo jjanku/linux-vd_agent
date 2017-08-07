@@ -157,5 +157,6 @@ int vdagent_x11_debug_error_handler(Display *display, XErrorEvent *error);
 int vdagent_x11_ignore_bad_window_handler(Display *display, XErrorEvent *error);
 
 void vdagent_x11_seamless_mode_send_list(struct vdagent_x11 *x11);
+void vdagent_x11_seamless_mode_send_change(struct vdagent_x11 *x11, Window window);
 
 #endif // VDAGENT_X11_PRIV

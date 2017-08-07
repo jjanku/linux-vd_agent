@@ -521,20 +521,25 @@ static void vdagent_x11_handle_event(struct vdagent_x11 *x11, XEvent event)
                     event.xconfigure.width, event.xconfigure.height);
         }
 
-        vdagent_x11_seamless_mode_send_list(x11);
+        vdagent_x11_seamless_mode_send_change(x11, event.xconfigure.window);
 
         handled = 1;
         break;
     case MappingNotify:
+        vdagent_x11_seamless_mode_send_list(x11);
+        handled = 1;
+        break;
     case CreateNotify:
     case CirculateNotify:
-    case DestroyNotify:
     case GravityNotify:
     case MapNotify:
     case ReparentNotify:
     case UnmapNotify:
+        vdagent_x11_seamless_mode_send_change(x11, event.xany.window);
+        handled = 1;
+        break;
+    case DestroyNotify:
         vdagent_x11_seamless_mode_send_list(x11);
-
         handled = 1;
         break;
     case ClientMessage:
@@ -561,7 +566,7 @@ static void vdagent_x11_handle_event(struct vdagent_x11 *x11, XEvent event)
         /* Always mark as handled, since we cannot unselect input for property
            notifications once we are done with handling the incr transfer. */
 
-        vdagent_x11_seamless_mode_send_list(x11);
+        vdagent_x11_seamless_mode_send_change(x11, event.xproperty.window);
 
         handled = 1;
         break;

@@ -943,6 +943,11 @@ static void agent_read_complete(struct udscs_connection **connp,
                                   VD_AGENT_SEAMLESS_MODE_LIST, 0,
                                   data, header->size);
         break;
+    case VDAGENTD_SEAMLESS_MODE_CHANGE:
+        vdagent_virtio_port_write(virtio_port, VDP_CLIENT_PORT,
+                                  VD_AGENT_SEAMLESS_MODE_CHANGE, 0,
+                                  data, header->size);
+        break;
 
     default:
         syslog(LOG_ERR, "unknown message from vdagent: %u, ignoring",

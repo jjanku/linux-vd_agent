@@ -204,7 +204,7 @@ get_window_list(struct vdagent_x11 *x11, Window window)
                     g_free(spice_window);
                     continue;
                 }
-
+                spice_window->id = (uint64_t)list[i];
                 window_list = g_list_append(window_list, spice_window);
             }
 
@@ -245,6 +245,7 @@ vdagent_x11_seamless_mode_send_list(struct vdagent_x11 *x11)
         list->windows[list->num_of_windows].y = window->y;
         list->windows[list->num_of_windows].w = window->w;
         list->windows[list->num_of_windows].h = window->h;
+        list->windows[list->num_of_windows].id = window->id;
 
         list->num_of_windows++;
     }
@@ -253,4 +254,34 @@ vdagent_x11_seamless_mode_send_list(struct vdagent_x11 *x11)
 
     udscs_write(x11->vdagentd, VDAGENTD_SEAMLESS_MODE_LIST, 0, 0,
                 (uint8_t *)list, size);
+}
+
+void vdagent_x11_seamless_mode_send_change(struct vdagent_x11 *x11, Window window)
+{
+    VDAgentSeamlessModeWindow win;
+    GList *window_list, *l;
+
+    if (!x11->seamless_mode)
+        return;
+
+    if (is_visible(x11->display, window)) {
+        get_geometry(x11->display, window, &win);
+        
+        if (vdagent_x11_restore_error_handler(x11) != 0) {
+            vdagent_x11_set_error_handler(x11, vdagent_x11_ignore_bad_window_handler);
+            return;
+        }
+
+        win.id = (uint64_t)window;
+        udscs_write(x11->vdagentd, VDAGENTD_SEAMLESS_MODE_CHANGE, 0, 0,
+                    (uint8_t *)&win, sizeof(VDAgentSeamlessModeWindow));
+
+    } else {
+        window_list = get_window_list(x11, window);
+        for (l = window_list; l != NULL; l = l->next) {
+            udscs_write(x11->vdagentd, VDAGENTD_SEAMLESS_MODE_CHANGE, 0, 0,
+                        (uint8_t *)l->data, sizeof(VDAgentSeamlessModeWindow));
+        }
+        g_list_free_full(window_list, (GDestroyNotify)g_free);
+    }
 }
