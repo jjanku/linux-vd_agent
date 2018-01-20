@@ -26,7 +26,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -40,6 +39,7 @@
 # include <gtk/gtk.h>
 #endif
 
+#include "log.h"
 #include "udscs.h"
 #include "vdagentd-proto.h"
 #include "vdagentd-proto-strings.h"
@@ -47,6 +47,8 @@
 #include "x11.h"
 #include "file-xfers.h"
 #include "clipboard.h"
+
+#define G_LOG_DOMAIN "spice-vdagent"
 
 typedef struct VDAgent {
     VDAgentClipboards *clipboards;
@@ -130,15 +132,14 @@ static gboolean vdagent_init_file_xfer(VDAgent *agent)
     gboolean open_dir;
 
     if (agent->xfers != NULL) {
-        syslog(LOG_DEBUG, "File-xfer already initialized");
+        g_debug("File-xfer already initialized");
         return TRUE;
     }
 
     xfer_dir = xfer_get_download_directory(agent);
     if (xfer_dir == NULL) {
-        syslog(LOG_WARNING,
-               "warning could not get file xfer save dir, "
-               "file transfers will be disabled");
+        g_warning("warning could not get file xfer save dir, "
+                  "file transfers will be disabled");
         return FALSE;
     }
 
@@ -146,8 +147,7 @@ static gboolean vdagent_init_file_xfer(VDAgent *agent)
                !vdagent_x11_has_icons_on_desktop(agent->x11) :
                fx_open_dir;
 
-    agent->xfers = vdagent_file_xfers_create(agent->conn, xfer_dir,
-                                             open_dir, debug);
+    agent->xfers = vdagent_file_xfers_create(agent->conn, xfer_dir, open_dir);
     return (agent->xfers != NULL);
 }
 
@@ -196,8 +196,7 @@ static void daemon_read_complete(struct udscs_connection **connp,
         break;
     case VDAGENTD_VERSION:
         if (strcmp((char *)data, VERSION) != 0) {
-            syslog(LOG_INFO, "vdagentd version mismatch: got %s expected %s",
-                   data, VERSION);
+            g_info("vdagentd version mismatch: got %s expected %s", data, VERSION);
             vdagent_quit_loop(agent);
             version_mismatch = 1;
         }
@@ -221,8 +220,7 @@ static void daemon_read_complete(struct udscs_connection **connp,
         }
         break;
     case VDAGENTD_FILE_XFER_DISABLE:
-        if (debug)
-            syslog(LOG_DEBUG, "Disabling file-xfers");
+        g_debug("Disabling file-xfers");
 
         vdagent_finalize_file_xfer(agent);
         break;
@@ -251,8 +249,7 @@ static void daemon_read_complete(struct udscs_connection **connp,
         }
         break;
     default:
-        syslog(LOG_ERR, "Unknown message from vdagentd type: %d, ignoring",
-               header->type);
+        g_warning("Unknown message from vdagentd type: %d, ignoring", header->type);
     }
 }
 
@@ -288,7 +285,7 @@ static int daemonize(void)
     int fd[2];
 
     if (socketpair(PF_LOCAL, SOCK_STREAM, 0, fd)) {
-        syslog(LOG_ERR, "socketpair : %s", strerror(errno));
+        g_critical("socketpair : %s", strerror(errno));
         exit(1);
     }
 
@@ -301,7 +298,7 @@ static int daemonize(void)
         close(fd[0]);
         return fd[1];
     case -1:
-        syslog(LOG_ERR, "fork: %s", strerror(errno));
+        g_critical("fork: %s", strerror(errno));
         exit(1);
     default:
         close(fd[1]);
@@ -369,14 +366,14 @@ static gboolean vdagent_init_async_cb(gpointer user_data)
 
     agent->conn = udscs_connect(vdagentd_socket,
                                 daemon_read_complete, daemon_disconnect_cb,
-                                vdagentd_messages, VDAGENTD_NO_MESSAGES, debug);
+                                vdagentd_messages, VDAGENTD_NO_MESSAGES);
     if (agent->conn == NULL) {
         g_timeout_add_seconds(1, vdagent_init_async_cb, agent);
         return G_SOURCE_REMOVE;
     }
     udscs_set_user_data(agent->conn, agent);
 
-    agent->x11 = vdagent_x11_create(agent->conn, debug, x11_sync);
+    agent->x11 = vdagent_x11_create(agent->conn, x11_sync);
     if (agent->x11 == NULL)
         goto err_init;
     agent->x11_channel = g_io_channel_unix_new(vdagent_x11_get_fd(agent->x11));
@@ -389,13 +386,13 @@ static gboolean vdagent_init_async_cb(gpointer user_data)
                    agent);
 
     if (!vdagent_init_file_xfer(agent))
-        syslog(LOG_WARNING, "File transfer is disabled");
+        g_warning("File transfer is disabled");
 
     agent->clipboards = vdagent_clipboards_init(agent->x11, agent->conn);
 
     if (parent_socket != -1) {
         if (write(parent_socket, "OK", 2) != 2)
-            syslog(LOG_WARNING, "Parent already gone.");
+            g_warning("Parent already gone.");
         close(parent_socket);
         parent_socket = -1;
     }
@@ -438,11 +435,10 @@ int main(int argc, char *argv[])
     if (vdagentd_socket == NULL)
         vdagentd_socket = g_strdup(VDAGENTD_SOCKET);
 
-    openlog("spice-vdagent", do_daemonize ? LOG_PID : (LOG_PID | LOG_PERROR),
-            LOG_USER);
+    vdagent_setup_log(G_LOG_DOMAIN, TRUE, debug);
 
     if (file_test(portdev) != 0) {
-        syslog(LOG_ERR, "Cannot access vdagent virtio channel %s", portdev);
+        g_critical("Cannot access vdagent virtio channel %s", portdev);
         return 1;
     }
 
@@ -456,7 +452,7 @@ int main(int argc, char *argv[])
 
 reconnect:
     if (version_mismatch) {
-        syslog(LOG_INFO, "Version mismatch, restarting");
+        g_message("Version mismatch, restarting");
         sleep(1);
         execvp(argv[0], argv);
     }

@@ -21,7 +21,6 @@
 #endif
 
 #include <glib.h>
-#include <syslog.h>
 #include <stdbool.h>
 #include <alsa/asoundlib.h>
 #include <alsa/mixer.h>
@@ -55,7 +54,7 @@ get_alsa_default_mixer_by_name(snd_mixer_t **handle, const char *name)
     return snd_mixer_find_selem(*handle, sid);
 
 fail:
-    syslog(LOG_WARNING, "%s fail: %s", __func__, snd_strerror(err));
+    g_warning("%s fail: %s", __func__, snd_strerror(err));
     return NULL;
 }
 
@@ -69,7 +68,7 @@ static bool set_alsa_capture(uint8_t mute, uint8_t nchannels, uint16_t *volume)
 
     e = get_alsa_default_mixer_by_name (&handle, "Capture");
     if (e == NULL) {
-        syslog(LOG_WARNING, "vdagent-audio: can't get default alsa mixer");
+        g_warning("vdagent-audio: can't get default alsa mixer");
         ret = false;
         goto end;
     }
@@ -82,21 +81,21 @@ static bool set_alsa_capture(uint8_t mute, uint8_t nchannels, uint16_t *volume)
     case 1: /* MONO */
         vol = CLAMP(volume[0], min, max);
         snd_mixer_selem_set_capture_volume(e, SND_MIXER_SCHN_MONO, vol);
-        syslog(LOG_DEBUG, "vdagent-audio: (capture-mono) %lu (%%%0.2f)",
-               vol, (float) (100*vol/max));
+        g_debug("vdagent-audio: (capture-mono) %lu (%%%0.2f)",
+                vol, (float) (100*vol/max));
         break;
     case 2: /* LEFT-RIGHT */
         vol = CLAMP(volume[0], min, max);
         snd_mixer_selem_set_capture_volume(e, SND_MIXER_SCHN_FRONT_LEFT, vol);
-        syslog(LOG_DEBUG, "vdagent-audio: (capture-left) %lu (%%%0.2f)",
-               vol, (float) (100*vol/max));
+        g_debug("vdagent-audio: (capture-left) %lu (%%%0.2f)",
+                vol, (float) (100*vol/max));
         vol = CLAMP(volume[1], min, max);
         snd_mixer_selem_set_capture_volume(e, SND_MIXER_SCHN_FRONT_RIGHT, vol);
-        syslog(LOG_DEBUG, "vdagent-audio: (capture-right) %lu (%%%0.2f)",
-               vol, (float) (100*vol/max));
+        g_debug("vdagent-audio: (capture-right) %lu (%%%0.2f)",
+                vol, (float) (100*vol/max));
         break;
     default:
-        syslog(LOG_WARNING, "vdagent-audio: number of channels not supported");
+        g_warning("vdagent-audio: number of channels not supported");
         ret = false;
     }
 end:
@@ -115,7 +114,7 @@ static bool set_alsa_playback (uint8_t mute, uint8_t nchannels, uint16_t *volume
 
     e = get_alsa_default_mixer_by_name (&handle, "Master");
     if (e == NULL) {
-        syslog(LOG_WARNING, "vdagent-audio: can't get default alsa mixer");
+        g_warning("vdagent-audio: can't get default alsa mixer");
         ret = false;
         goto end;
     }
@@ -128,21 +127,21 @@ static bool set_alsa_playback (uint8_t mute, uint8_t nchannels, uint16_t *volume
     case 1: /* MONO */
         vol = CLAMP(volume[0], min, max);
         snd_mixer_selem_set_playback_volume(e, SND_MIXER_SCHN_MONO, vol);
-        syslog(LOG_DEBUG, "vdagent-audio: (playback-mono) %lu (%%%0.2f)",
-               vol, (float) (100*vol/max));
+        g_debug("vdagent-audio: (playback-mono) %lu (%%%0.2f)",
+                vol, (float) (100*vol/max));
         break;
     case 2: /* LEFT-RIGHT */
         vol = CLAMP(volume[0], min, max);
         snd_mixer_selem_set_playback_volume(e, SND_MIXER_SCHN_FRONT_LEFT, vol);
-        syslog(LOG_DEBUG, "vdagent-audio: (playback-left) %lu (%%%0.2f)",
-               vol, (float) (100*vol/max));
+        g_debug("vdagent-audio: (playback-left) %lu (%%%0.2f)",
+                vol, (float) (100*vol/max));
         vol = CLAMP(volume[1], min, max);
         snd_mixer_selem_set_playback_volume(e, SND_MIXER_SCHN_FRONT_RIGHT, vol);
-        syslog(LOG_DEBUG, "vdagent-audio: (playback-right) %lu (%%%0.2f)",
-               vol, (float) (100*vol/max));
+        g_debug("vdagent-audio: (playback-right) %lu (%%%0.2f)",
+                vol, (float) (100*vol/max));
         break;
     default:
-        syslog(LOG_WARNING, "vdagent-audio: number of channels not supported");
+        g_warning("vdagent-audio: number of channels not supported");
         ret = false;
     }
 end:
@@ -153,16 +152,16 @@ end:
 
 void vdagent_audio_playback_sync(uint8_t mute, uint8_t nchannels, uint16_t *volume)
 {
-    syslog(LOG_DEBUG, "%s mute=%s nchannels=%u",
-           __func__, (mute) ? "yes" : "no", nchannels);
+    g_debug("%s mute=%s nchannels=%u",
+            __func__, (mute) ? "yes" : "no", nchannels);
     if (set_alsa_playback (mute, nchannels, volume) == false)
-        syslog(LOG_WARNING, "Fail to sync playback volume");
+        g_warning("Fail to sync playback volume");
 }
 
 void vdagent_audio_record_sync(uint8_t mute, uint8_t nchannels, uint16_t *volume)
 {
-    syslog(LOG_DEBUG, "%s mute=%s nchannels=%u",
-           __func__, (mute) ? "yes" : "no", nchannels);
+    g_debug("%s mute=%s nchannels=%u",
+            __func__, (mute) ? "yes" : "no", nchannels);
     if (set_alsa_capture (mute, nchannels, volume) == false)
-        syslog(LOG_WARNING, "Fail to sync record volume");
+        g_warning("Fail to sync record volume");
 }

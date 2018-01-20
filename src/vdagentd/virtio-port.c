@@ -22,7 +22,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/select.h>
@@ -114,7 +113,7 @@ struct vdagent_virtio_port *vdagent_virtio_port_create(const char *portname,
     return vport;
 
 error:
-    syslog(LOG_ERR, "open %s: %m", portname);
+    g_critical("open %s: %m", portname);
     if (vport->fd != -1) {
         close(vport->fd);
     }
@@ -249,12 +248,12 @@ int vdagent_virtio_port_write_append(struct vdagent_virtio_port *vport,
 
     wbuf = vdagent_virtio_port_get_last_wbuf(vport);
     if (!wbuf) {
-        syslog(LOG_ERR, "can't append without a buffer");
+        g_critical("can't append without a buffer");
         return -1;
     }
 
     if (wbuf->size - wbuf->write_pos < size) {
-        syslog(LOG_ERR, "can't append to full buffer");
+        g_critical("can't append to full buffer");
         return -1;
     }
 
@@ -288,7 +287,7 @@ void vdagent_virtio_port_flush(struct vdagent_virtio_port **vportp)
 void vdagent_virtio_port_reset(struct vdagent_virtio_port *vport, int port)
 {
     if (port >= VDP_END_PORT) {
-        syslog(LOG_ERR, "vdagent_virtio_port_reset port out of range");
+        g_critical("vdagent_virtio_port_reset port out of range");
         return;
     }
     free(vport->port_data[port].message_data);
@@ -320,7 +319,7 @@ static void vdagent_virtio_port_do_chunk(struct vdagent_virtio_port **vportp)
             if (port->message_header.size) {
                 port->message_data = malloc(port->message_header.size);
                 if (!port->message_data) {
-                    syslog(LOG_ERR, "out of memory, disconnecting virtio");
+                    g_critical("out of memory, disconnecting virtio");
                     vdagent_virtio_port_destroy(vportp);
                     return;
                 }
@@ -334,7 +333,7 @@ static void vdagent_virtio_port_do_chunk(struct vdagent_virtio_port **vportp)
         avail = vport->chunk_header.size - pos;
 
         if (avail > read) {
-            syslog(LOG_ERR, "chunk larger than message, lost sync?");
+            g_critical("chunk larger than message, lost sync?");
             vdagent_virtio_port_destroy(vportp);
             return;
         }
@@ -393,7 +392,7 @@ static void vdagent_virtio_port_do_read(struct vdagent_virtio_port **vportp)
     if (n < 0) {
         if (errno == EINTR)
             return;
-        syslog(LOG_ERR, "reading from vdagent virtio port: %m");
+        g_critical("reading from vdagent virtio port: %m");
     }
     if (n == 0 && vport->opening) {
         /* When we open the virtio serial port, the following happens:
@@ -431,14 +430,12 @@ static void vdagent_virtio_port_do_read(struct vdagent_virtio_port **vportp)
             vport->chunk_header.size = GUINT32_FROM_LE(vport->chunk_header.size);
             vport->chunk_header.port = GUINT32_FROM_LE(vport->chunk_header.port);
             if (vport->chunk_header.size > VD_AGENT_MAX_DATA_SIZE) {
-                syslog(LOG_ERR, "chunk size %u too large",
-                       vport->chunk_header.size);
+                g_critical("chunk size %u too large", vport->chunk_header.size);
                 vdagent_virtio_port_destroy(vportp);
                 return;
             }
             if (vport->chunk_header.port >= VDP_END_PORT) {
-                syslog(LOG_ERR, "chunk port %u out of range",
-                       vport->chunk_header.port);
+                g_critical("chunk port %u out of range", vport->chunk_header.port);
                 vdagent_virtio_port_destroy(vportp);
                 return;
             }
@@ -472,12 +469,12 @@ static void vdagent_virtio_port_do_write(struct vdagent_virtio_port **vportp)
 
     struct vdagent_virtio_port_buf* wbuf = vport->write_buf;
     if (!wbuf) {
-        syslog(LOG_ERR, "do_write called on a port without a write buf ?!");
+        g_critical("do_write called on a port without a write buf ?!");
         return;
     }
 
     if (wbuf->write_pos != wbuf->size) {
-        syslog(LOG_ERR, "do_write: buffer is incomplete!!");
+        g_critical("do_write: buffer is incomplete!!");
         return;
     }
 
@@ -486,7 +483,7 @@ static void vdagent_virtio_port_do_write(struct vdagent_virtio_port **vportp)
     if (n < 0) {
         if (errno == EINTR)
             return;
-        syslog(LOG_ERR, "writing to vdagent virtio port: %m");
+        g_critical("writing to vdagent virtio port: %m");
         vdagent_virtio_port_destroy(vportp);
         return;
     }

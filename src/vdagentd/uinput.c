@@ -24,12 +24,12 @@
 #endif
 
 #include <stdlib.h>
-#include <syslog.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <linux/input.h>
 #include <linux/uinput.h>
+#include <glib.h>
 #include <spice/vd_agent.h>
 #include "uinput.h"
 
@@ -99,10 +99,10 @@ void vdagentd_uinput_update_size(struct vdagentd_uinput **uinputp,
     int i, rc;
 
     if (uinput->debug) {
-        syslog(LOG_DEBUG, "uinput-update-size: %dx%d", width, height);
+        g_debug("uinput-update-size: %dx%d", width, height);
         for (i = 0; i < screen_count; i++)
-            syslog(LOG_DEBUG, "screen %d: +%d+%d", i, screen_info[i].x,
-                   screen_info[i].y);
+            g_debug("screen %d: +%d+%d", i, screen_info[i].x,
+                    screen_info[i].y);
     }
 
     uinput->screen_info  = screen_info;
@@ -123,7 +123,7 @@ void vdagentd_uinput_update_size(struct vdagentd_uinput **uinputp,
 
     uinput->fd = open(uinput->devname, uinput->fake ? O_WRONLY : O_RDWR);
     if (uinput->fd == -1) {
-        syslog(LOG_ERR, "open %s: %m", uinput->devname);
+        g_critical("open %s: %m", uinput->devname);
         vdagentd_uinput_destroy(uinputp);
         return;
     }
@@ -135,7 +135,7 @@ void vdagentd_uinput_update_size(struct vdagentd_uinput **uinputp,
 
     rc = write(uinput->fd, &device, sizeof(device));
     if (rc != sizeof(device)) {
-        syslog(LOG_ERR, "write %s: %m", uinput->devname);
+        g_critical("write %s: %m", uinput->devname);
         vdagentd_uinput_destroy(uinputp);
         return;
     }
@@ -157,7 +157,7 @@ void vdagentd_uinput_update_size(struct vdagentd_uinput **uinputp,
 
     rc = ioctl(uinput->fd, UI_DEV_CREATE);
     if (rc < 0) {
-        syslog(LOG_ERR, "create %s: %m", uinput->devname);
+        g_critical("create %s: %m", uinput->devname);
         vdagentd_uinput_destroy(uinputp);
     }
 }
@@ -175,7 +175,7 @@ static void uinput_send_event(struct vdagentd_uinput **uinputp,
 
     rc = write(uinput->fd, &event, sizeof(event));
     if (rc != sizeof(event)) {
-        syslog(LOG_ERR, "write %s: %m", uinput->devname);
+        g_critical("write %s: %m", uinput->devname);
         vdagentd_uinput_destroy(uinputp);
     }
 }
@@ -202,13 +202,13 @@ void vdagentd_uinput_do_mouse(struct vdagentd_uinput **uinputp,
 
     if (*uinputp) {
         if (mouse->display_id >= uinput->screen_count) {
-            syslog(LOG_WARNING, "mouse event for unknown monitor (%d >= %d)",
-                   mouse->display_id, uinput->screen_count);
+            g_warning("mouse event for unknown monitor (%d >= %d)",
+                      mouse->display_id, uinput->screen_count);
             return;
         }
         if (uinput->debug)
-            syslog(LOG_DEBUG, "mouse-event: mon %d %dx%d", mouse->display_id,
-                   mouse->x, mouse->y);
+            g_debug("mouse-event: mon %d %dx%d", mouse->display_id,
+                    mouse->x, mouse->y);
         mouse->x += uinput->screen_info[mouse->display_id].x;
         mouse->y += uinput->screen_info[mouse->display_id].y;
 #ifdef WITH_STATIC_UINPUT
@@ -219,12 +219,12 @@ void vdagentd_uinput_do_mouse(struct vdagentd_uinput **uinputp,
 
     if (*uinputp && uinput->last.x != mouse->x) {
         if (uinput->debug)
-            syslog(LOG_DEBUG, "mouse: abs-x %d", mouse->x);
+            g_debug("mouse: abs-x %d", mouse->x);
         uinput_send_event(uinputp, EV_ABS, ABS_X, mouse->x);
     }
     if (*uinputp && uinput->last.y != mouse->y) {
         if (uinput->debug)
-            syslog(LOG_DEBUG, "mouse: abs-y %d", mouse->y);
+            g_debug("mouse: abs-y %d", mouse->y);
         uinput_send_event(uinputp, EV_ABS, ABS_Y, mouse->y);
     }
     for (i = 0; i < sizeof(btns)/sizeof(btns[0]) && *uinputp; i++) {
@@ -233,7 +233,7 @@ void vdagentd_uinput_do_mouse(struct vdagentd_uinput **uinputp,
             continue;
         down = !!(mouse->buttons & btns[i].mask);
         if (uinput->debug)
-            syslog(LOG_DEBUG, "mouse: btn-%s %s",
+            g_debug("mouse: btn-%s %s",
                     btns[i].name, down ? "down" : "up");
         uinput_send_event(uinputp, EV_KEY, btns[i].btn, down);
     }
@@ -243,14 +243,14 @@ void vdagentd_uinput_do_mouse(struct vdagentd_uinput **uinputp,
             continue;
         if (mouse->buttons & wheel[i].mask) {
             if (uinput->debug)
-                syslog(LOG_DEBUG, "mouse: wheel-%s", wheel[i].name);
+                g_debug("mouse: wheel-%s", wheel[i].name);
             uinput_send_event(uinputp, EV_REL, REL_WHEEL, wheel[i].btn);
         }
     }
 
     if (*uinputp) {
         if (uinput->debug)
-            syslog(LOG_DEBUG, "mouse: syn");
+            g_debug("mouse: syn");
         uinput_send_event(uinputp, EV_SYN, SYN_REPORT, 0);
     }
 

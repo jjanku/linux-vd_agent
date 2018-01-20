@@ -29,14 +29,14 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
-#include <syslog.h>
+#include <glib.h>
 #include "xorg-conf.h"
 
 #define FPRINTF(...) \
     do { \
         r = fprintf(f, __VA_ARGS__); \
         if (r < 0) { \
-            syslog(LOG_ERR, "Error writing to %s: %m", xorg_conf); \
+            g_critical("Error writing to %s: %m", xorg_conf); \
             fclose(f); \
             pci_system_cleanup(); \
             return; \
@@ -61,7 +61,7 @@ void vdagentd_write_xorg_conf(VDAgentMonitorsConfig *monitor_conf)
 
     r = rename(xorg_conf, xorg_conf_old);
     if (r && errno != ENOENT) {
-        syslog(LOG_ERR,
+        g_critical(
                "Error renaming %s to %s: %m, not generating xorg.conf",
                xorg_conf, xorg_conf_old);
         return;
@@ -69,27 +69,27 @@ void vdagentd_write_xorg_conf(VDAgentMonitorsConfig *monitor_conf)
 
     r = pci_system_init();
     if (r) {
-        syslog(LOG_ERR, "Error initializing libpciaccess: %d, not generating xorg.conf", r);
+        g_critical("Error initializing libpciaccess: %d, not generating xorg.conf", r);
         return;
     }
 
     it = pci_id_match_iterator_create(&qxl_id_match);
     if (!it) {
-        syslog(LOG_ERR, "Error could not create pci id iterator for QXL devices, not generating xorg.conf");
+        g_critical("Error could not create pci id iterator for QXL devices, not generating xorg.conf");
         pci_system_cleanup();
         return;
     }
 
     dev = pci_device_next(it);
     if (!dev) {
-        syslog(LOG_ERR, "No QXL devices found, not generating xorg.conf");
+        g_critical("No QXL devices found, not generating xorg.conf");
         pci_system_cleanup();
         return;
     }
 
     f = fopen(xorg_conf, "w");
     if (!f) {
-        syslog(LOG_ERR, "Error opening %s for writing: %m", xorg_conf);
+        g_critical("Error opening %s for writing: %m", xorg_conf);
         pci_system_cleanup();
         return;
     }

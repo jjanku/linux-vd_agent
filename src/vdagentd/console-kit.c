@@ -25,7 +25,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <glib.h>
 
 struct session_info {
@@ -33,7 +32,6 @@ struct session_info {
     int fd;
     char *seat;
     char *active_session;
-    int verbose;
     gchar *match_seat_signals;
     gchar *match_session_signals;
     gboolean session_is_locked;
@@ -68,9 +66,8 @@ static void si_dbus_match_remove(struct session_info *info)
         dbus_bus_remove_match(info->connection,
                               info->match_seat_signals,
                               &error);
-        if (info->verbose)
-            syslog(LOG_DEBUG, "(console-kit) seat match removed: %s",
-                   info->match_seat_signals);
+        g_debug("(console-kit) seat match removed: %s",
+                info->match_seat_signals);
         g_free(info->match_seat_signals);
         info->match_seat_signals = NULL;
     }
@@ -81,9 +78,8 @@ static void si_dbus_match_remove(struct session_info *info)
                               info->match_session_signals,
                               &error);
 
-        if (info->verbose)
-            syslog(LOG_DEBUG, "(console-kit) session match removed: %s",
-                   info->match_session_signals);
+        g_debug("(console-kit) session match removed: %s",
+                info->match_session_signals);
         g_free(info->match_session_signals);
         info->match_session_signals = NULL;
     }
@@ -105,17 +101,16 @@ static void si_dbus_match_rule_update(struct session_info *info)
                              "member='ActiveSessionChanged'",
                              INTERFACE_CONSOLE_KIT_SEAT,
                              info->seat);
-        if (info->verbose)
-            syslog(LOG_DEBUG, "(console-kit) seat match: %s",
-                   info->match_seat_signals);
+        g_debug("(console-kit) seat match: %s",
+                info->match_seat_signals);
 
         dbus_error_init(&error);
         dbus_bus_add_match(info->connection,
                            info->match_seat_signals,
                            &error);
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_WARNING, "Unable to add dbus rule match: %s",
-                   error.message);
+            g_warning("Unable to add dbus rule match: %s",
+                      error.message);
             dbus_error_free(&error);
             g_free(info->match_seat_signals);
             info->match_seat_signals = NULL;
@@ -128,17 +123,16 @@ static void si_dbus_match_rule_update(struct session_info *info)
             g_strdup_printf ("type='signal',interface='%s',path='%s'",
                              INTERFACE_CONSOLE_KIT_SESSION,
                              info->active_session);
-        if (info->verbose)
-            syslog(LOG_DEBUG, "(console-kit) session match: %s",
-                   info->match_session_signals);
+        g_debug("(console-kit) session match: %s",
+                info->match_session_signals);
 
         dbus_error_init(&error);
         dbus_bus_add_match(info->connection,
                            info->match_session_signals,
                            &error);
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_WARNING, "Unable to add dbus rule match: %s",
-                   error.message);
+            g_warning("Unable to add dbus rule match: %s",
+                      error.message);
             dbus_error_free(&error);
             g_free(info->match_session_signals);
             info->match_session_signals = NULL;
@@ -176,13 +170,11 @@ si_dbus_read_signals(struct session_info *info)
                     info->active_session = g_strdup(session);
                     si_dbus_match_rule_update(info);
                 } else {
-                    syslog(LOG_WARNING, "(console-kit) received invalid session. "
-                           "No active-session at the moment");
+                    g_warning("(console-kit) received invalid session. "
+                              "No active-session at the moment");
                 }
             } else {
-                syslog(LOG_ERR,
-                       "ActiveSessionChanged message has unexpected type: '%c'",
-                       type);
+                g_critical("ActiveSessionChanged message has unexpected type: '%c'", type);
             }
         } else if (g_strcmp0(member, SESSION_SIGNAL_LOCK) == 0) {
             info->session_is_locked = TRUE;
@@ -199,15 +191,13 @@ si_dbus_read_signals(struct session_info *info)
                 dbus_message_iter_get_basic(&iter, &idle_hint);
                 info->session_idle_hint = (idle_hint);
             } else {
-                syslog(LOG_ERR,
-                       "(console-kit) IdleHintChanged has unexpected type: '%c'",
-                       type);
+                g_critical("(console-kit) IdleHintChanged has unexpected type: '%c'", type);
             }
         } else {
             if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_SIGNAL) {
-                syslog(LOG_WARNING, "(console-kit) received non signal message");
-            } else if (info->verbose) {
-                syslog(LOG_DEBUG, "(console-kit) Signal not handled: %s", member);
+                g_warning("(console-kit) received non signal message");
+            } else {
+                g_debug("(console-kit) Signal not handled: %s", member);
             }
         }
 
@@ -217,7 +207,7 @@ si_dbus_read_signals(struct session_info *info)
     }
 }
 
-struct session_info *session_info_create(int verbose)
+struct session_info *session_info_create()
 {
     struct session_info *info;
     DBusError error;
@@ -226,7 +216,6 @@ struct session_info *session_info_create(int verbose)
     if (!info)
         return NULL;
 
-    info->verbose = verbose;
     info->session_is_locked = FALSE;
     info->session_idle_hint = FALSE;
 
@@ -234,17 +223,17 @@ struct session_info *session_info_create(int verbose)
     info->connection = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error);
     if (info->connection == NULL || dbus_error_is_set(&error)) {
         if (dbus_error_is_set(&error)) {
-             syslog(LOG_ERR, "Unable to connect to system bus: %s",
-                    error.message);
+             g_critical("Unable to connect to system bus: %s",
+                        error.message);
              dbus_error_free(&error);
         } else
-             syslog(LOG_ERR, "Unable to connect to system bus");
+             g_critical("Unable to connect to system bus");
         free(info);
         return NULL;
     }
 
     if (!dbus_connection_get_unix_fd(info->connection, &info->fd)) {
-        syslog(LOG_ERR, "Unable to get connection fd");
+        g_critical("Unable to get connection fd");
         session_info_destroy(info);
         return NULL;
     }
@@ -290,7 +279,7 @@ static char *console_kit_get_first_seat(struct session_info *info)
                                            INTERFACE_CONSOLE_KIT_MANAGER,
                                            "GetSeats");
     if (message == NULL) {
-        syslog(LOG_ERR, "Unable to create dbus message");
+        g_critical("Unable to create dbus message");
         goto exit;
     }
 
@@ -301,17 +290,17 @@ static char *console_kit_get_first_seat(struct session_info *info)
                                                       &error);
     if (reply == NULL || dbus_error_is_set(&error)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "GetSeats failed: %s", error.message);
+            g_critical("GetSeats failed: %s", error.message);
             dbus_error_free(&error);
         } else
-            syslog(LOG_ERR, "GetSeats failed");
+            g_critical("GetSeats failed");
         goto exit;
     }
 
     dbus_message_iter_init(reply, &iter);
     type = dbus_message_iter_get_arg_type(&iter);
     if (type != DBUS_TYPE_ARRAY) {
-        syslog(LOG_ERR,
+        g_critical(
                "expected an array return value, got a '%c' instead", type);
         goto exit;
     }
@@ -319,7 +308,7 @@ static char *console_kit_get_first_seat(struct session_info *info)
     dbus_message_iter_recurse(&iter, &subiter);
     type = dbus_message_iter_get_arg_type(&subiter);
     if (type != DBUS_TYPE_OBJECT_PATH) {
-        syslog(LOG_ERR,
+        g_critical(
                "expected an object path element, got a '%c' instead", type);
         goto exit;
     }
@@ -336,7 +325,7 @@ exit:
             dbus_message_unref(message);
     }
 
-    syslog(LOG_INFO, "(console-kit) seat: %s", info->seat);
+    g_debug("(console-kit) seat: %s", info->seat);
     return info->seat;
 }
 
@@ -358,7 +347,7 @@ const char *session_info_get_active_session(struct session_info *info)
                                            INTERFACE_CONSOLE_KIT_SEAT,
                                            "GetActiveSession");
     if (message == NULL) {
-        syslog(LOG_ERR, "Unable to create dbus message");
+        g_critical("Unable to create dbus message");
         goto exit;
     }
 
@@ -369,10 +358,10 @@ const char *session_info_get_active_session(struct session_info *info)
                                                       &error);
     if (reply == NULL || dbus_error_is_set(&error)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "GetActiveSession failed: %s", error.message);
+            g_critical("GetActiveSession failed: %s", error.message);
             dbus_error_free(&error);
         } else
-            syslog(LOG_ERR, "GetActiveSession failed");
+            g_critical("GetActiveSession failed");
         goto exit;
     }
 
@@ -382,10 +371,10 @@ const char *session_info_get_active_session(struct session_info *info)
                                DBUS_TYPE_OBJECT_PATH, &session,
                                DBUS_TYPE_INVALID)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "error get ssid from reply: %s", error.message);
+            g_critical("error get ssid from reply: %s", error.message);
             dbus_error_free(&error);
         } else
-            syslog(LOG_ERR, "error getting ssid from reply");
+            g_critical("error getting ssid from reply");
         session = NULL;
         goto exit;
     }
@@ -422,13 +411,13 @@ char *session_info_session_for_pid(struct session_info *info, uint32_t pid)
                                            INTERFACE_CONSOLE_KIT_MANAGER,
                                            "GetSessionForUnixProcess");
     if (message == NULL) {
-        syslog(LOG_ERR, "Unable to create dbus message");
+        g_critical("Unable to create dbus message");
         goto exit;
     }
 
     dbus_message_iter_init_append(message, &args);
     if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_UINT32, &pid)) {
-        syslog(LOG_ERR, "Unable to append dbus message args");
+        g_critical("Unable to append dbus message args");
         goto exit;
     }
 
@@ -439,11 +428,11 @@ char *session_info_session_for_pid(struct session_info *info, uint32_t pid)
                                                       &error);
     if (reply == NULL || dbus_error_is_set(&error)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "GetSessionForUnixProcess failed: %s",
-                   error.message);
+            g_critical("GetSessionForUnixProcess failed: %s",
+                       error.message);
             dbus_error_free(&error);
         } else
-            syslog(LOG_ERR, "GetSessionForUnixProcess failed");
+            g_critical("GetSessionForUnixProcess failed");
         goto exit;
     }
 
@@ -453,10 +442,10 @@ char *session_info_session_for_pid(struct session_info *info, uint32_t pid)
                                DBUS_TYPE_OBJECT_PATH, &ssid,
                                DBUS_TYPE_INVALID)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "error get ssid from reply: %s", error.message);
+            g_critical("error get ssid from reply: %s", error.message);
             dbus_error_free(&error);
         } else
-            syslog(LOG_ERR, "error getting ssid from reply");
+            g_critical("error getting ssid from reply");
         ssid = NULL;
         goto exit;
     }
@@ -478,9 +467,8 @@ exit:
 static char *console_kit_check_active_session_change(struct session_info *info)
 {
     si_dbus_read_signals(info);
-    if (info->verbose)
-        syslog(LOG_DEBUG, "(console-kit) active-session: '%s'",
-               (info->active_session ? info->active_session : "None"));
+    g_debug("(console-kit) active-session: '%s'",
+            (info->active_session ? info->active_session : "None"));
 
     return info->active_session;
 }
@@ -498,10 +486,8 @@ gboolean session_info_session_is_locked(struct session_info *info)
      * see https://github.com/ConsoleKit2/ConsoleKit2/issues/89 */
     si_dbus_read_signals(info);
     locked = info->session_idle_hint;
-    if (info->verbose) {
-        syslog(LOG_DEBUG, "(console-kit) session is locked: %s",
-               locked ? "yes" : "no");
-    }
+    g_debug("(console-kit) session is locked: %s",
+            locked ? "yes" : "no");
     return locked;
 }
 
@@ -524,8 +510,7 @@ gboolean session_info_is_user(struct session_info *info)
                                            INTERFACE_CONSOLE_KIT_SESSION,
                                            "GetSessionType");
     if (message == NULL) {
-        syslog(LOG_ERR,
-               "(console-kit) Unable to create dbus message for GetSessionType");
+        g_critical("(console-kit) Unable to create dbus message for GetSessionType");
         return TRUE;
     }
 
@@ -536,10 +521,10 @@ gboolean session_info_is_user(struct session_info *info)
                                                       &error);
     if (reply == NULL || dbus_error_is_set(&error)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "GetSessionType failed: %s", error.message);
+            g_critical("GetSessionType failed: %s", error.message);
             dbus_error_free(&error);
         } else
-            syslog(LOG_ERR, "GetSessionType failed");
+            g_critical("GetSessionType failed");
         goto exit;
     }
 
@@ -549,20 +534,18 @@ gboolean session_info_is_user(struct session_info *info)
                                DBUS_TYPE_STRING, &session_type,
                                DBUS_TYPE_INVALID)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR,
-                   "(console-kit) fail to get session-type from reply: %s",
-                   error.message);
+            g_critical("(console-kit) fail to get session-type from reply: %s",
+                       error.message);
             dbus_error_free(&error);
         } else {
-            syslog(LOG_ERR, "(console-kit) fail to get session-type from reply");
+            g_critical("(console-kit) fail to get session-type from reply");
         }
         session_type = NULL;
         goto exit;
     }
 
     /* Empty session_type means user */
-    if (info->verbose)
-        syslog(LOG_DEBUG, "(console-kit) session-type is '%s'", session_type);
+    g_debug("(console-kit) session-type is '%s'", session_type);
 
     ret = (g_strcmp0 (session_type, "LoginWindow") != 0);
 

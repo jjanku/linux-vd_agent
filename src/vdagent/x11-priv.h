@@ -115,7 +115,6 @@ struct vdagent_x11 {
 #endif
     Window root_window[MAX_SCREENS];
     struct udscs_connection *vdagentd;
-    int debug;
     int fd;
     int screen_count;
     int width[MAX_SCREENS];

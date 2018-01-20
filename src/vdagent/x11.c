@@ -198,8 +198,7 @@ static gchar *vdagent_x11_get_wm_name(struct vdagent_x11 *x11)
 #endif
 }
 
-struct vdagent_x11 *vdagent_x11_create(struct udscs_connection *vdagentd,
-    int debug, int sync)
+struct vdagent_x11 *vdagent_x11_create(struct udscs_connection *vdagentd, int sync)
 {
     struct vdagent_x11 *x11;
     XWindowAttributes attrib;
@@ -212,24 +211,23 @@ struct vdagent_x11 *vdagent_x11_create(struct udscs_connection *vdagentd,
 
     x11 = calloc(1, sizeof(*x11));
     if (!x11) {
-        syslog(LOG_ERR, "out of memory allocating vdagent_x11 struct");
+        g_critical("out of memory allocating vdagent_x11 struct");
         return NULL;
     }
 
     x11->vdagentd = vdagentd;
-    x11->debug = debug;
 
     x11->display = XOpenDisplay(NULL);
     if (!x11->display) {
-        syslog(LOG_ERR, "could not connect to X-server");
+        g_critical("could not connect to X-server");
         free(x11);
         return NULL;
     }
 
     x11->screen_count = ScreenCount(x11->display);
     if (x11->screen_count > MAX_SCREENS) {
-        syslog(LOG_ERR, "Error too much screens: %d > %d",
-               x11->screen_count, MAX_SCREENS);
+        g_critical("Error too much screens: %d > %d",
+                   x11->screen_count, MAX_SCREENS);
         XCloseDisplay(x11->display);
         free(x11);
         return NULL;
@@ -318,9 +316,8 @@ struct vdagent_x11 *vdagent_x11_create(struct udscs_connection *vdagentd,
             break;
         usleep(100000);
     }
-    if (x11->debug)
-        syslog(LOG_DEBUG, "%s: net_wm_name=\"%s\", has icons=%d",
-               __func__, net_wm_name, vdagent_x11_has_icons_on_desktop(x11));
+    g_debug("%s: net_wm_name=\"%s\", has icons=%d",
+            __func__, net_wm_name, vdagent_x11_has_icons_on_desktop(x11));
     g_free(net_wm_name);
 
     /* Flush output buffers and consume any pending events */
@@ -624,9 +621,9 @@ static void vdagent_x11_handle_event(struct vdagent_x11 *x11, XEvent event)
     }
 #endif
     }
-    if (!handled && x11->debug)
-        syslog(LOG_DEBUG, "unhandled x11 event, type %d, window %d",
-               (int)event.type, (int)event.xany.window);
+    if (!handled)
+        g_debug("unhandled x11 event, type %d, window %d",
+                (int)event.type, (int)event.xany.window);
 }
 
 void vdagent_x11_do_read(struct vdagent_x11 *x11)

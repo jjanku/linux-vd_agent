@@ -23,12 +23,11 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <syslog.h>
 #include <systemd/sd-login.h>
 #include <dbus/dbus.h>
+#include <glib.h>
 
 struct session_info {
-    int verbose;
     sd_login_monitor *mon;
     char *session;
     struct {
@@ -61,11 +60,11 @@ static DBusConnection *si_dbus_get_system_bus(void)
     connection = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error);
     if (connection == NULL || dbus_error_is_set(&error)) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_WARNING, "Unable to connect to system bus: %s",
-                   error.message);
+            g_warning("Unable to connect to system bus: %s",
+                      error.message);
             dbus_error_free(&error);
         } else {
-            syslog(LOG_WARNING, "Unable to connect to system bus");
+            g_warning("Unable to connect to system bus");
         }
         return NULL;
     }
@@ -102,16 +101,15 @@ static void si_dbus_match_rule_update(struct session_info *si)
                          LOGIND_SESSION_OBJ_TEMPLATE"'",
                          LOGIND_SESSION_INTERFACE,
                          si->session);
-    if (si->verbose)
-        syslog(LOG_DEBUG, "logind match: %s", si->dbus.match_session_signals);
+    g_debug("logind match: %s", si->dbus.match_session_signals);
 
     dbus_error_init(&error);
     dbus_bus_add_match(si->dbus.system_connection,
                        si->dbus.match_session_signals,
                        &error);
     if (dbus_error_is_set(&error)) {
-        syslog(LOG_WARNING, "Unable to add dbus rule match: %s",
-               error.message);
+        g_warning("Unable to add dbus rule match: %s",
+                  error.message);
         dbus_error_free(&error);
         g_free(si->dbus.match_session_signals);
         si->dbus.match_session_signals = NULL;
@@ -140,7 +138,7 @@ si_dbus_read_properties(struct session_info *si)
                                            "Get");
     g_free (session_object);
     if (message == NULL) {
-        syslog(LOG_ERR, "Unable to create dbus message");
+        g_critical("Unable to create dbus message");
         goto exit;
     }
 
@@ -151,7 +149,7 @@ si_dbus_read_properties(struct session_info *si)
                                    DBUS_TYPE_STRING, &property,
                                    DBUS_TYPE_INVALID);
     if (!ret) {
-        syslog(LOG_ERR, "Unable to request locked-hint");
+        g_critical("Unable to request locked-hint");
         goto exit;
     }
 
@@ -162,10 +160,10 @@ si_dbus_read_properties(struct session_info *si)
                                                       &error);
     if (reply == NULL) {
         if (dbus_error_is_set(&error)) {
-            syslog(LOG_ERR, "Properties.Get failed (locked-hint) due %s", error.message);
+            g_critical("Properties.Get failed (locked-hint) due %s", error.message);
             dbus_error_free(&error);
         } else {
-            syslog(LOG_ERR, "Properties.Get failed (locked-hint)");
+            g_critical("Properties.Get failed (locked-hint)");
         }
         goto exit;
     }
@@ -173,14 +171,14 @@ si_dbus_read_properties(struct session_info *si)
     dbus_message_iter_init(reply, &iter);
     type = dbus_message_iter_get_arg_type(&iter);
     if (type != DBUS_TYPE_VARIANT) {
-        syslog(LOG_ERR, "expected a variant, got a '%c' instead", type);
+        g_critical("expected a variant, got a '%c' instead", type);
         goto exit;
     }
 
     dbus_message_iter_recurse(&iter, &iter_variant);
     type = dbus_message_iter_get_arg_type(&iter_variant);
     if (type != DBUS_TYPE_BOOLEAN) {
-        syslog(LOG_ERR, "expected a boolean, got a '%c' instead", type);
+        g_critical("expected a boolean, got a '%c' instead", type);
         goto exit;
     }
     dbus_message_iter_get_basic(&iter_variant, &locked_hint);
@@ -213,9 +211,9 @@ si_dbus_read_signals(struct session_info *si)
             si->session_is_locked = FALSE;
         } else {
             if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_SIGNAL) {
-                syslog(LOG_WARNING, "(systemd-login) received non signal message");
-            } else if (si->verbose) {
-                syslog(LOG_DEBUG, "(systemd-login) Signal not handled: %s", member);
+                g_warning("(systemd-login) received non signal message");
+            } else {
+                g_debug("(systemd-login) Signal not handled: %s", member);
             }
         }
 
@@ -225,7 +223,7 @@ si_dbus_read_signals(struct session_info *si)
     }
 }
 
-struct session_info *session_info_create(int verbose)
+struct session_info *session_info_create()
 {
     struct session_info *si;
     int r;
@@ -234,12 +232,11 @@ struct session_info *session_info_create(int verbose)
     if (!si)
         return NULL;
 
-    si->verbose = verbose;
     si->session_is_locked = FALSE;
 
     r = sd_login_monitor_new("session", &si->mon);
     if (r < 0) {
-        syslog(LOG_ERR, "Error creating login monitor: %s", strerror(-r));
+        g_critical("Error creating login monitor: %s", strerror(-r));
         free(si);
         return NULL;
     }
@@ -274,12 +271,11 @@ const char *session_info_get_active_session(struct session_info *si)
     r = sd_seat_get_active("seat0", &si->session, NULL);
     /* ENOENT happens when a seat is switching from one session to another */
     if (r < 0 && r != -ENOENT)
-        syslog(LOG_ERR, "Error getting active session: %s",
-                strerror(-r));
+        g_critical("Error getting active session: %s",
+                   strerror(-r));
 
-    if (si->verbose && si->session &&
-            (!old_session || strcmp(old_session, si->session)))
-        syslog(LOG_INFO, "Active session: %s", si->session);
+    if (si->session && (!old_session || strcmp(old_session, si->session)))
+        g_debug("Active session: %s", si->session);
 
     sd_login_monitor_flush(si->mon);
     free(old_session);
@@ -295,10 +291,10 @@ char *session_info_session_for_pid(struct session_info *si, uint32_t pid)
 
     r = sd_pid_get_session(pid, &session);
     if (r < 0)
-        syslog(LOG_ERR, "Error getting session for pid %u: %s",
-                pid, strerror(-r));
-    else if (si->verbose)
-        syslog(LOG_INFO, "Session for pid %u: %s", pid, session);
+        g_critical("Error getting session for pid %u: %s",
+                   pid, strerror(-r));
+    else
+        g_debug("Session for pid %u: %s", pid, session);
 
     return session;
 }
@@ -313,10 +309,8 @@ gboolean session_info_session_is_locked(struct session_info *si)
     si_dbus_read_properties(si);
 
     locked = (si->session_is_locked || si->session_locked_hint);
-    if (si->verbose) {
-        syslog(LOG_DEBUG, "(systemd-login) session is locked: %s",
-               locked ? "yes" : "no");
-    }
+    g_debug("(systemd-login) session is locked: %s",
+            locked ? "yes" : "no");
     return locked;
 }
 
@@ -331,14 +325,13 @@ gboolean session_info_is_user(struct session_info *si)
     g_return_val_if_fail (si->session != NULL, TRUE);
 
     if (sd_session_get_class(si->session, &class) != 0) {
-        syslog(LOG_WARNING, "Unable to get class from session: %s",
-               si->session);
+        g_warning("Unable to get class from session: %s",
+                  si->session);
         return TRUE;
     }
 
-    if (si->verbose)
-        syslog(LOG_DEBUG, "(systemd-login) class for %s is %s",
-               si->session, class);
+    g_debug("(systemd-login) class for %s is %s",
+            si->session, class);
 
     ret = (g_strcmp0(class, "user") == 0);
     g_free(class);

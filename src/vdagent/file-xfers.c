@@ -27,7 +27,6 @@
 #include <stdlib.h>
 #include <inttypes.h>
 #include <string.h>
-#include <syslog.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -45,7 +44,6 @@ struct vdagent_file_xfers {
     struct udscs_connection *vdagentd;
     char *save_dir;
     int open_save_dir;
-    int debug;
 };
 
 typedef struct AgentFileXferTask {
@@ -56,7 +54,6 @@ typedef struct AgentFileXferTask {
     uint64_t                       file_size;
     int                            file_xfer_nr;
     int                            file_xfer_total;
-    int                            debug;
 } AgentFileXferTask;
 
 static void vdagent_file_xfer_task_free(gpointer data)
@@ -66,13 +63,13 @@ static void vdagent_file_xfer_task_free(gpointer data)
     g_return_if_fail(task != NULL);
 
     if (task->file_fd > 0) {
-        syslog(LOG_ERR, "file-xfer: Removing task %u and file %s due to error",
-               task->id, task->file_name);
+        g_critical("file-xfer: Removing task %u and file %s due to error",
+                   task->id, task->file_name);
         close(task->file_fd);
         unlink(task->file_name);
-    } else if (task->debug)
-        syslog(LOG_DEBUG, "file-xfer: Removing task %u %s",
-               task->id, task->file_name);
+    } else
+        g_debug("file-xfer: Removing task %u %s",
+                task->id, task->file_name);
 
     g_free(task->file_name);
     g_free(task);
@@ -80,7 +77,7 @@ static void vdagent_file_xfer_task_free(gpointer data)
 
 struct vdagent_file_xfers *vdagent_file_xfers_create(
     struct udscs_connection *vdagentd, const char *save_dir,
-    int open_save_dir, int debug)
+    int open_save_dir)
 {
     struct vdagent_file_xfers *xfers;
 
@@ -90,7 +87,6 @@ struct vdagent_file_xfers *vdagent_file_xfers_create(
     xfers->vdagentd = vdagentd;
     xfers->save_dir = g_strdup(save_dir);
     xfers->open_save_dir = open_save_dir;
-    xfers->debug = debug;
 
     return xfers;
 }
@@ -113,7 +109,7 @@ static AgentFileXferTask *vdagent_file_xfers_get_task(
 
     task = g_hash_table_lookup(xfers->xfers, GUINT_TO_POINTER(id));
     if (task == NULL)
-        syslog(LOG_ERR, "file-xfer: error cannot find task %u", id);
+        g_critical("file-xfer: error cannot find task %u", id);
 
     return task;
 }
@@ -131,8 +127,8 @@ static AgentFileXferTask *vdagent_parse_start_msg(
                                   (const gchar *)msg->data,
                                   -1,
                                   G_KEY_FILE_NONE, &error) == FALSE) {
-        syslog(LOG_ERR, "file-xfer: failed to load keyfile: %s",
-               error->message);
+        g_critical("file-xfer: failed to load keyfile: %s",
+                   error->message);
         goto error;
     }
     task = g_new0(AgentFileXferTask, 1);
@@ -140,15 +136,15 @@ static AgentFileXferTask *vdagent_parse_start_msg(
     task->file_name = g_key_file_get_string(
         keyfile, "vdagent-file-xfer", "name", &error);
     if (error) {
-        syslog(LOG_ERR, "file-xfer: failed to parse filename: %s",
-               error->message);
+        g_critical("file-xfer: failed to parse filename: %s",
+                   error->message);
         goto error;
     }
     task->file_size = g_key_file_get_uint64(
         keyfile, "vdagent-file-xfer", "size", &error);
     if (error) {
-        syslog(LOG_ERR, "file-xfer: failed to parse filesize: %s",
-               error->message);
+        g_critical("file-xfer: failed to parse filesize: %s",
+                   error->message);
         goto error;
     }
     /* These are set for xfers which are part of a multi-file xfer */
@@ -173,8 +169,8 @@ static uint64_t get_free_space_available(const char *path)
 {
     struct statvfs stat;
     if (statvfs(path, &stat) != 0) {
-        syslog(LOG_WARNING, "file-xfer: failed to get free space, statvfs error: %s",
-               strerror(errno));
+        g_warning("file-xfer: failed to get free space, statvfs error: %s",
+                  strerror(errno));
         return G_MAXUINT64;
     }
     return stat.f_bsize * stat.f_bavail;
@@ -192,8 +188,8 @@ void vdagent_file_xfers_start(struct vdagent_file_xfers *xfers,
     g_return_if_fail(xfers != NULL);
 
     if (g_hash_table_lookup(xfers->xfers, GUINT_TO_POINTER(msg->id))) {
-        syslog(LOG_ERR, "file-xfer: error id %u already exists, ignoring!",
-               msg->id);
+        g_critical("file-xfer: error id %u already exists, ignoring!",
+                   msg->id);
         return;
     }
 
@@ -201,8 +197,6 @@ void vdagent_file_xfers_start(struct vdagent_file_xfers *xfers,
     if (task == NULL) {
         goto error;
     }
-
-    task->debug = xfers->debug;
 
     file_path = g_build_filename(xfers->save_dir, task->file_name, NULL);
 
@@ -216,8 +210,8 @@ void vdagent_file_xfers_start(struct vdagent_file_xfers *xfers,
         free_space_str = g_format_size_for_display(free_space);
         file_size_str = g_format_size_for_display(task->file_size);
 #endif
-        syslog(LOG_ERR, "file-xfer: not enough free space (%s to copy, %s free)",
-               file_size_str, free_space_str);
+        g_critical("file-xfer: not enough free space (%s to copy, %s free)",
+                   file_size_str, free_space_str);
         g_free(free_space_str);
         g_free(file_size_str);
 
@@ -235,7 +229,7 @@ void vdagent_file_xfers_start(struct vdagent_file_xfers *xfers,
 
     dir = g_path_get_dirname(file_path);
     if (g_mkdir_with_parents(dir, S_IRWXU) == -1) {
-        syslog(LOG_ERR, "file-xfer: Failed to create dir %s", dir);
+        g_critical("file-xfer: Failed to create dir %s", dir);
         goto error;
     }
 
@@ -250,29 +244,28 @@ void vdagent_file_xfers_start(struct vdagent_file_xfers *xfers,
     g_free(task->file_name);
     task->file_name = path;
     if (i == 64) {
-        syslog(LOG_ERR, "file-xfer: more than 63 copies of %s exist?",
-               file_path);
+        g_critical("file-xfer: more than 63 copies of %s exist?",
+                   file_path);
         goto error;
     }
 
     task->file_fd = open(path, O_CREAT | O_WRONLY, 0644);
     if (task->file_fd == -1) {
-        syslog(LOG_ERR, "file-xfer: failed to create file %s: %s",
-               path, strerror(errno));
+        g_critical("file-xfer: failed to create file %s: %s",
+                   path, strerror(errno));
         goto error;
     }
 
     if (ftruncate(task->file_fd, task->file_size) < 0) {
-        syslog(LOG_ERR, "file-xfer: err reserving %"PRIu64" bytes for %s: %s",
-               task->file_size, path, strerror(errno));
+        g_critical("file-xfer: err reserving %"PRIu64" bytes for %s: %s",
+                   task->file_size, path, strerror(errno));
         goto error;
     }
 
     g_hash_table_insert(xfers->xfers, GUINT_TO_POINTER(msg->id), task);
 
-    if (xfers->debug)
-        syslog(LOG_DEBUG, "file-xfer: Adding task %u %s %"PRIu64" bytes",
-               task->id, path, task->file_size);
+    g_debug("file-xfer: Adding task %u %s %"PRIu64" bytes",
+            task->id, path, task->file_size);
 
     udscs_write(xfers->vdagentd, VDAGENTD_FILE_XFER_STATUS,
                 msg->id, VD_AGENT_FILE_XFER_STATUS_CAN_SEND_DATA, NULL, 0);
@@ -302,8 +295,8 @@ void vdagent_file_xfers_status(struct vdagent_file_xfers *xfers,
 
     switch (msg->result) {
     case VD_AGENT_FILE_XFER_STATUS_CAN_SEND_DATA:
-        syslog(LOG_ERR, "file-xfer: task %u %s received unexpected 0 response",
-               task->id, task->file_name);
+        g_critical("file-xfer: task %u %s received unexpected 0 response",
+                   task->id, task->file_name);
         break;
     default:
         /* Cancel or Error, remove this task */
@@ -328,9 +321,8 @@ void vdagent_file_xfers_data(struct vdagent_file_xfers *xfers,
         task->read_bytes += msg->size;
         if (task->read_bytes >= task->file_size) {
             if (task->read_bytes == task->file_size) {
-                if (xfers->debug)
-                    syslog(LOG_DEBUG, "file-xfer: task %u %s has completed",
-                           task->id, task->file_name);
+                g_debug("file-xfer: task %u %s has completed",
+                        task->id, task->file_name);
                 close(task->file_fd);
                 task->file_fd = -1;
                 if (xfers->open_save_dir &&
@@ -341,21 +333,20 @@ void vdagent_file_xfers_data(struct vdagent_file_xfers *xfers,
                     if (!g_spawn_async(NULL, argv, NULL,
                                            G_SPAWN_SEARCH_PATH,
                                            NULL, NULL, NULL, &error)) {
-                        syslog(LOG_WARNING,
-                               "file-xfer: failed to open save directory: %s",
-                               error->message);
+                        g_warning("file-xfer: failed to open save directory: %s",
+                                  error->message);
                         g_error_free(error);
                     }
                 }
                 status = VD_AGENT_FILE_XFER_STATUS_SUCCESS;
             } else {
-                syslog(LOG_ERR, "file-xfer: error received too much data");
+                g_critical("file-xfer: error received too much data");
                 status = VD_AGENT_FILE_XFER_STATUS_ERROR;
             }
         }
     } else {
-        syslog(LOG_ERR, "file-xfer: error writing %s: %s", task->file_name,
-               strerror(errno));
+        g_critical("file-xfer: error writing %s: %s", task->file_name,
+                   strerror(errno));
         status = VD_AGENT_FILE_XFER_STATUS_ERROR;
     }
 

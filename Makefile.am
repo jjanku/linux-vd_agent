@@ -9,6 +9,8 @@ common_sources =				\
 	src/udscs.h				\
 	src/vdagentd-proto-strings.h		\
 	src/vdagentd-proto.h			\
+	src/log.c			\
+	src/log.h			\
 	$(NULL)
 
 src_spice_vdagent_CFLAGS =			\
@@ -19,6 +21,7 @@ src_spice_vdagent_CFLAGS =			\
 	$(ALSA_CFLAGS)				\
 	-I$(srcdir)/src				\
 	-DUDSCS_NO_SERVER			\
+	-DG_LOG_DOMAIN=\"spice-vdagent\" \
 	$(NULL)
 
 src_spice_vdagent_LDADD =			\
@@ -53,6 +56,7 @@ src_spice_vdagentd_CFLAGS =			\
 	$(GLIB2_CFLAGS)				\
 	$(PIE_CFLAGS)				\
 	-I$(srcdir)/src				\
+	-DG_LOG_DOMAIN=\"spice-vdagentd\" \
 	$(NULL)
 
 src_spice_vdagentd_LDADD =			\

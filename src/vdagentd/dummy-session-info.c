@@ -21,7 +21,7 @@
 
 #include "session-info.h"
 
-struct session_info *session_info_create(int verbose)
+struct session_info *session_info_create()
 {
     return NULL;
 }

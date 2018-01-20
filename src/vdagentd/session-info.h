@@ -28,7 +28,7 @@
 
 struct session_info;
 
-struct session_info *session_info_create(int verbose);
+struct session_info *session_info_create();
 void session_info_destroy(struct session_info *ck);
 
 int session_info_get_fd(struct session_info *ck);

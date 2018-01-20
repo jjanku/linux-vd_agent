@@ -24,7 +24,6 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <string.h>
-#include <syslog.h>
 #include <stdlib.h>
 #include <limits.h>
 
@@ -119,7 +118,7 @@ static void update_randr_res(struct vdagent_x11 *x11, int poll)
                               &x11->randr.min_height,
                               &x11->randr.max_width,
                               &x11->randr.max_height) != 1) {
-        syslog(LOG_ERR, "update_randr_res: RRGetScreenSizeRange failed");
+        g_critical("update_randr_res: RRGetScreenSizeRange failed");
     }
 }
 
@@ -128,8 +127,8 @@ void vdagent_x11_randr_init(struct vdagent_x11 *x11)
     int i;
 
     if (x11->screen_count > 1) {
-        syslog(LOG_WARNING, "X-server has more than 1 screen, "
-               "disabling client -> guest resolution syncing");
+        g_warning("X-server has more than 1 screen, "
+                  "disabling client -> guest resolution syncing");
         return;
     }
 
@@ -153,14 +152,13 @@ void vdagent_x11_randr_init(struct vdagent_x11 *x11)
 
     switch (x11->has_xrandr << 4 | x11->has_xinerama) {
     case 0x00:
-        syslog(LOG_ERR, "Neither Xrandr nor Xinerama found, assuming single monitor setup");
+        g_critical("Neither Xrandr nor Xinerama found, assuming single monitor setup");
         break;
     case 0x01:
-        if (x11->debug)
-            syslog(LOG_DEBUG, "Found Xinerama extension without Xrandr, assuming Xinerama multi monitor setup");
+        g_debug("Found Xinerama extension without Xrandr, assuming Xinerama multi monitor setup");
         break;
     case 0x10:
-        syslog(LOG_ERR, "Found Xrandr but no Xinerama, weird!");
+        g_critical("Found Xrandr but no Xinerama, weird!");
         break;
     case 0x11:
         /* Standard xrandr setup, nothing to see here */
@@ -213,13 +211,12 @@ static void delete_mode(struct vdagent_x11 *x11, int output_index,
         return;
 
     snprintf(name, sizeof(name), "%dx%d-%d", width, height, output_index);
-    if (x11->debug)
-        syslog(LOG_DEBUG, "Deleting mode %s", name);
+    g_debug("Deleting mode %s", name);
 
     output_info = x11->randr.outputs[output_index];
     if (output_info->ncrtc != 1) {
-        syslog(LOG_ERR, "output has %d crtcs, expected exactly 1, "
-               "failed to delete mode", output_info->ncrtc);
+        g_critical("output has %d crtcs, expected exactly 1, "
+                   "failed to delete mode", output_info->ncrtc);
         return;
     }
     for (m = 0 ; m < x11->randr.res->nmode; ++m) {
@@ -350,8 +347,8 @@ static int xrandr_add_and_set(struct vdagent_x11 *x11, int output, int x, int y,
     int old_height = x11->randr.monitor_sizes[output].height;
 
     if (!x11->randr.res || output >= x11->randr.res->noutput || output < 0) {
-        syslog(LOG_ERR, "%s: program error: missing RANDR or bad output",
-               __FUNCTION__);
+        g_critical("%s: program error: missing RANDR or bad output",
+                   __FUNCTION__);
         return 0;
     }
     if (x11->set_crtc_config_not_functional) {
@@ -364,7 +361,7 @@ static int xrandr_add_and_set(struct vdagent_x11 *x11, int output, int x, int y,
         mode = create_new_mode(x11, output, width, height);
     }
     if (!mode) {
-        syslog(LOG_ERR, "failed to add a new mode");
+        g_critical("failed to add a new mode");
         return 0;
     }
     XRRAddOutputMode(x11->display, xid, mode->id);
@@ -376,7 +373,7 @@ static int xrandr_add_and_set(struct vdagent_x11 *x11, int output, int x, int y,
                          CurrentTime, x, y, mode->id, RR_Rotate_0, outputs,
                          1);
     if (vdagent_x11_restore_error_handler(x11) || (s != RRSetConfigSuccess)) {
-        syslog(LOG_ERR, "failed to XRRSetCrtcConfig");
+        g_critical("failed to XRRSetCrtcConfig");
         x11->set_crtc_config_not_functional = 1;
         return 0;
     }
@@ -393,8 +390,8 @@ static void xrandr_disable_output(struct vdagent_x11 *x11, int output)
     Status s;
 
     if (!x11->randr.res || output >= x11->randr.res->noutput || output < 0) {
-        syslog(LOG_ERR, "%s: program error: missing RANDR or bad output",
-               __FUNCTION__);
+        g_critical("%s: program error: missing RANDR or bad output",
+                   __FUNCTION__);
         return;
     }
 
@@ -404,7 +401,7 @@ static void xrandr_disable_output(struct vdagent_x11 *x11, int output)
                          NULL, 0);
 
     if (s != RRSetConfigSuccess)
-        syslog(LOG_ERR, "failed to disable monitor");
+        g_critical("failed to disable monitor");
 
     delete_mode(x11, output, x11->randr.monitor_sizes[output].width,
                              x11->randr.monitor_sizes[output].height);
@@ -423,11 +420,10 @@ static int set_screen_to_best_size(struct vdagent_x11 *x11, int width, int heigh
 
     sizes = XRRSizes(x11->display, 0, &num_sizes);
     if (!sizes || !num_sizes) {
-        syslog(LOG_ERR, "XRRSizes failed");
+        g_critical("XRRSizes failed");
         return 0;
     }
-    if (x11->debug)
-        syslog(LOG_DEBUG, "set_screen_to_best_size found %d modes\n", num_sizes);
+    g_debug("set_screen_to_best_size found %d modes\n", num_sizes);
 
     /* Find the closest size which will fit within the monitor */
     for (i = 0; i < num_sizes; i++) {
@@ -445,13 +441,13 @@ static int set_screen_to_best_size(struct vdagent_x11 *x11, int width, int heigh
     }
 
     if (best == -1) {
-        syslog(LOG_ERR, "no suitable resolution found for monitor");
+        g_critical("no suitable resolution found for monitor");
         return 0;
     }
 
     config = XRRGetScreenInfo(x11->display, x11->root_window[0]);
     if(!config) {
-        syslog(LOG_ERR, "get screen info failed");
+        g_critical("get screen info failed");
         return 0;
     }
     XRRConfigCurrentConfiguration(config, &rotation);
@@ -459,9 +455,8 @@ static int set_screen_to_best_size(struct vdagent_x11 *x11, int width, int heigh
                        rotation, CurrentTime);
     XRRFreeScreenConfigInfo(config);
 
-    if (x11->debug)
-        syslog(LOG_DEBUG, "set_screen_to_best_size set size to: %dx%d\n",
-               sizes[best].width, sizes[best].height);
+    g_debug("set_screen_to_best_size set size to: %dx%d\n",
+            sizes[best].width, sizes[best].height);
     *out_width = sizes[best].width;
     *out_height = sizes[best].height;
     return 1;
@@ -476,9 +471,8 @@ void vdagent_x11_randr_handle_root_size_change(struct vdagent_x11 *x11,
         return;
     }
 
-    if (x11->debug)
-        syslog(LOG_DEBUG, "Root size of screen %d changed to %dx%d send %d",
-              screen,  width, height, !x11->dont_send_guest_xorg_res);
+    g_debug("Root size of screen %d changed to %dx%d send %d",
+            screen,  width, height, !x11->dont_send_guest_xorg_res);
 
     x11->width[screen]  = width;
     x11->height[screen] = height;
@@ -549,12 +543,12 @@ static void constrain_to_screen(struct vdagent_x11 *x11, int *w, int *h)
     ly = x11->randr.min_height;
     hy = x11->randr.max_height;
     if (constrain_to_range(lx, w, hx)) {
-        syslog(LOG_ERR, "width not in driver range: ! %d < %d < %d",
-               lx, orig_w, hx);
+        g_critical("width not in driver range: ! %d < %d < %d",
+                   lx, orig_w, hx);
     }
     if (constrain_to_range(ly, h, hy)) {
-        syslog(LOG_ERR, "height not in driver range: ! %d < %d < %d",
-               ly, orig_h, hy);
+        g_critical("height not in driver range: ! %d < %d < %d",
+                   ly, orig_h, hy);
     }
 }
 
@@ -596,8 +590,8 @@ static void zero_base_monitors(struct vdagent_x11 *x11,
         max_y = max_int(mon_config->monitors[i].y + *mon_height, max_y);
     }
     if (min_x != 0 || min_y != 0) {
-        syslog(LOG_ERR, "%s: agent config %d,%d rooted, adjusting to 0,0.",
-               __FUNCTION__, min_x, min_y);
+        g_critical("%s: agent config %d,%d rooted, adjusting to 0,0.",
+                   __FUNCTION__, min_x, min_y);
         for (i = 0 ; i < mon_config->num_of_monitors; ++i) {
             if (!monitor_enabled(&mon_config->monitors[i]))
                 continue;
@@ -658,7 +652,7 @@ static VDAgentMonitorsConfig *get_current_mon_config(struct vdagent_x11 *x11)
 
     mon_config = calloc(1, config_size(res->noutput));
     if (!mon_config) {
-        syslog(LOG_ERR, "out of memory allocating current monitor config");
+        g_critical("out of memory allocating current monitor config");
         return NULL;
     }
 
@@ -687,7 +681,7 @@ static VDAgentMonitorsConfig *get_current_mon_config(struct vdagent_x11 *x11)
     return mon_config;
 
 error:
-    syslog(LOG_ERR, "error: inconsistent or stale data from X");
+    g_critical("error: inconsistent or stale data from X");
     free(mon_config);
     return NULL;
 }
@@ -699,14 +693,14 @@ static void dump_monitors_config(struct vdagent_x11 *x11,
     int i;
     VDAgentMonConfig *m;
 
-    syslog(LOG_DEBUG, "%s: %d, %x", prefix, mon_config->num_of_monitors,
-           mon_config->flags);
+    g_debug("%s: %d, %x", prefix, mon_config->num_of_monitors,
+            mon_config->flags);
     for (i = 0 ; i < mon_config->num_of_monitors; ++i) {
         m = &mon_config->monitors[i];
         if (!monitor_enabled(m))
             continue;
-        syslog(LOG_DEBUG, "received monitor %d config %dx%d+%d+%d", i,
-               m->width, m->height, m->x, m->y);
+        g_debug("received monitor %d config %dx%d+%d+%d", i,
+                m->width, m->height, m->x, m->y);
     }
 }
 
@@ -732,13 +726,11 @@ void vdagent_x11_set_monitor_config(struct vdagent_x11 *x11,
         goto exit;
 
     if (enabled_monitors(mon_config) < 1) {
-        syslog(LOG_ERR, "client sent config with all monitors disabled");
+        g_critical("client sent config with all monitors disabled");
         goto exit;
     }
 
-    if (x11->debug) {
-        dump_monitors_config(x11, mon_config, "from guest");
-    }
+    dump_monitors_config(x11, mon_config, "from guest");
 
     for (i = 0; i < mon_config->num_of_monitors; i++) {
         if (monitor_enabled(&mon_config->monitors[i]))
@@ -748,15 +740,15 @@ void vdagent_x11_set_monitor_config(struct vdagent_x11 *x11,
 
     update_randr_res(x11, 0);
     if (mon_config->num_of_monitors > x11->randr.res->noutput) {
-        syslog(LOG_WARNING,
+        g_warning(
                "warning unexpected client request: #mon %d > driver output %d",
                mon_config->num_of_monitors, x11->randr.res->noutput);
         mon_config->num_of_monitors = x11->randr.res->noutput;
     }
 
     if (mon_config->num_of_monitors > MONITOR_SIZE_COUNT) {
-        syslog(LOG_WARNING, "warning: client send %d monitors, capping at %d",
-               mon_config->num_of_monitors, MONITOR_SIZE_COUNT);
+        g_warning("warning: client send %d monitors, capping at %d",
+                  mon_config->num_of_monitors, MONITOR_SIZE_COUNT);
         mon_config->num_of_monitors = MONITOR_SIZE_COUNT;
     }
 
@@ -764,9 +756,7 @@ void vdagent_x11_set_monitor_config(struct vdagent_x11 *x11,
 
     constrain_to_screen(x11, &primary_w, &primary_h);
 
-    if (x11->debug) {
-        dump_monitors_config(x11, mon_config, "after zeroing");
-    }
+    dump_monitors_config(x11, mon_config, "after zeroing");
 
     curr = get_current_mon_config(x11);
     if (!curr)
@@ -777,7 +767,7 @@ void vdagent_x11_set_monitor_config(struct vdagent_x11 *x11,
     }
 
     if (same_monitor_configs(mon_config, x11->randr.failed_conf)) {
-        syslog(LOG_WARNING, "Ignoring previous failed client monitor config");
+        g_warning("Ignoring previous failed client monitor config");
         goto exit;
     }
 
@@ -810,10 +800,9 @@ void vdagent_x11_set_monitor_config(struct vdagent_x11 *x11,
         y = curr->monitors[i].y;
 
         if ((x + width > primary_w) || (y + height > primary_h)) {
-            if (x11->debug)
-                syslog(LOG_DEBUG, "Disabling monitor %d: "
-                       "%dx%d+%d+%d > (%d,%d)",
-                       i, width, height, x, y, primary_w, primary_h);
+            g_debug("Disabling monitor %d: "
+                    "%dx%d+%d+%d > (%d,%d)",
+                    i, width, height, x, y, primary_w, primary_h);
 
             xrandr_disable_output(x11, i);
         }
@@ -825,16 +814,15 @@ void vdagent_x11_set_monitor_config(struct vdagent_x11 *x11,
         int width_mm = (MM_PER_INCH * primary_w) / dpi;
         int height_mm = (MM_PER_INCH * primary_h) / dpi;
 
-        if (x11->debug)
-            syslog(LOG_DEBUG, "Changing screen size to %dx%d",
-                   primary_w, primary_h);
+        g_debug("Changing screen size to %dx%d",
+                primary_w, primary_h);
         vdagent_x11_set_error_handler(x11, error_handler);
         XRRSetScreenSize(x11->display, x11->root_window[0], primary_w, primary_h,
                          width_mm, height_mm);
         if (vdagent_x11_restore_error_handler(x11)) {
-            syslog(LOG_ERR, "XRRSetScreenSize failed, not enough mem?");
+            g_critical("XRRSetScreenSize failed, not enough mem?");
             if (!fallback) {
-                syslog(LOG_WARNING, "Restoring previous config");
+                g_warning("Restoring previous config");
                 vdagent_x11_set_monitor_config(x11, curr, 1);
                 free(curr);
                 /* Remember this config failed, if the client is maximized or
@@ -934,8 +922,8 @@ void vdagent_x11_send_daemon_guest_xorg_res(struct vdagent_x11 *x11, int update)
         }
         for (i = 0; i < screen_count; i++) {
             if (screen_info[i].screen_number >= screen_count) {
-                syslog(LOG_ERR, "Invalid screen number in xinerama screen info (%d >= %d)",
-                       screen_info[i].screen_number, screen_count);
+                g_critical("Invalid screen number in xinerama screen info (%d >= %d)",
+                           screen_info[i].screen_number, screen_count);
                 XFree(screen_info);
                 free(res);
                 return;
@@ -966,16 +954,14 @@ no_info:
         }
     }
 
-    if (x11->debug) {
-        for (i = 0; i < screen_count; i++)
-            syslog(LOG_DEBUG, "Screen %d %dx%d%+d%+d", i, res[i].width,
-                   res[i].height, res[i].x, res[i].y);
-    }
+    for (i = 0; i < screen_count; i++)
+        g_debug("Screen %d %dx%d%+d%+d", i, res[i].width,
+                res[i].height, res[i].x, res[i].y);
 
     udscs_write(x11->vdagentd, VDAGENTD_GUEST_XORG_RESOLUTION, width, height,
                 (uint8_t *)res, screen_count * sizeof(*res));
     free(res);
     return;
 no_mem:
-    syslog(LOG_ERR, "out of memory while trying to send resolutions, not sending resolutions.");
+    g_critical("out of memory while trying to send resolutions, not sending resolutions.");
 }

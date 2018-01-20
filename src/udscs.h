@@ -69,7 +69,7 @@ typedef void (*udscs_disconnect_callback)(struct udscs_connection *conn);
 struct udscs_connection *udscs_connect(const char *socketname,
     udscs_read_callback read_callback,
     udscs_disconnect_callback disconnect_callback,
-    const char * const type_to_string[], int no_types, int debug);
+    const char * const type_to_string[], int no_types);
 
 /* Close the connection, releases the corresponding resources and
  * sets *connp to NULL.
@@ -113,7 +113,7 @@ struct udscs_server *udscs_create_server_for_fd(int fd,
     udscs_connect_callback connect_callback,
     udscs_read_callback read_callback,
     udscs_disconnect_callback disconnect_callback,
-    const char * const type_to_string[], int no_types, int debug);
+    const char * const type_to_string[], int no_types);
 
 /* Create the unix domain socket specified by socketname and
  * start listening on it.
@@ -130,7 +130,7 @@ struct udscs_server *udscs_create_server(const char *socketname,
     udscs_connect_callback connect_callback,
     udscs_read_callback read_callback,
     udscs_disconnect_callback disconnect_callback,
-    const char * const type_to_string[], int no_types, int debug);
+    const char * const type_to_string[], int no_types);
 
 /* Close all the server's connections and releases the corresponding
  * resources.
