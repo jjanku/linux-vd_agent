@@ -96,6 +96,83 @@ static guint get_type_from_atom(GdkAtom atom)
     return VD_AGENT_CLIPBOARD_NONE;
 }
 
+static gboolean send_grab(VDAgentClipboards *c, guint sel_id,
+                          GdkAtom *atoms, gint n_atoms)
+{
+    if (atoms == NULL)
+        return FALSE;
+
+    switch (c->protocol) {
+    case CLIPBOARD_PROTOCOL_COMPATIBILITY: {
+        Selection *sel = &c->selections[sel_id];
+        guint32 types[G_N_ELEMENTS(atom2agent)];
+        guint type, n_types, a;
+
+        for (type = 0; type < TYPE_COUNT; type++)
+            sel->targets[type] = GDK_NONE;
+
+        n_types = 0;
+        for (a = 0; a < n_atoms; a++) {
+            type = get_type_from_atom(atoms[a]);
+            if (type == VD_AGENT_CLIPBOARD_NONE || sel->targets[type] != GDK_NONE)
+                continue;
+
+            sel->targets[type] = atoms[a];
+            types[n_types] = type;
+            n_types++;
+        }
+
+        if (n_types == 0) {
+            syslog(LOG_WARNING, "%s: sel_id=%u: no target supported", __func__, sel_id);
+            return FALSE;
+        }
+
+        udscs_write(c->conn, VDAGENTD_CLIPBOARD_GRAB, sel_id, 0,
+                    (guint8 *)types, n_types * sizeof(guint32));
+        break;
+    }
+    }
+    return TRUE;
+}
+
+static gboolean send_request(VDAgentClipboards *c, guint sel_id, GdkAtom target)
+{
+    switch (c->protocol) {
+    case CLIPBOARD_PROTOCOL_COMPATIBILITY: {
+        guint type = get_type_from_atom(target);
+        g_return_val_if_fail(type != VD_AGENT_CLIPBOARD_NONE, FALSE);
+        udscs_write(c->conn, VDAGENTD_CLIPBOARD_REQUEST, sel_id, type, NULL, 0);
+        break;
+    }
+    }
+    return TRUE;
+}
+
+static void send_data(VDAgentClipboards *c, guint sel_id,
+                      GdkAtom type, gint format,
+                      const guchar *data, gint data_len)
+{
+    if (c->conn == NULL)
+        return;
+    switch (c->protocol) {
+    case CLIPBOARD_PROTOCOL_COMPATIBILITY:
+        udscs_write(c->conn, VDAGENTD_CLIPBOARD_DATA, sel_id,
+                    get_type_from_atom(type), data, data_len);
+        break;
+    }
+}
+
+static void send_release(VDAgentClipboards *c, guint sel_id)
+{
+    if (c->conn == NULL)
+        return;
+    switch (c->protocol) {
+    case CLIPBOARD_PROTOCOL_COMPATIBILITY:
+        udscs_write(c->conn, VDAGENTD_CLIPBOARD_RELEASE, sel_id, 0, NULL, 0);
+        break;
+    }
+}
+
 /* gtk_clipboard_request_(, callback, user_data) cannot be cancelled.
    Instead, gpointer *ref = request_ref_new() is passed to the callback.
    Callback can check using request_ref_is_cancelled(ref)
@@ -143,9 +220,7 @@ static void clipboard_new_owner(VDAgentClipboards *c, guint sel_id, guint new_ow
     /* respond to pending client's data requests */
     for (l = sel->requests_from_client; l != NULL; l = l->next) {
         request_ref_cancel(l->data);
-        if (c->conn)
-            udscs_write(c->conn, VDAGENTD_CLIPBOARD_DATA,
-                        sel_id, VD_AGENT_CLIPBOARD_NONE, NULL, 0);
+        send_data(c, sel_id, GDK_NONE, 8, NULL, 0);
     }
     g_clear_pointer(&sel->requests_from_client, g_list_free);
 
@@ -161,40 +236,13 @@ static void clipboard_targets_received_cb(GtkClipboard *clipboard,
         return;
 
     VDAgentClipboards *c = request_ref_free(user_data);
-    Selection *sel;
-    guint32 types[G_N_ELEMENTS(atom2agent)];
-    guint sel_id, type, n_types, a;
+    guint sel_id;
 
     sel_id = sel_id_from_clip(clipboard);
-    sel = &c->selections[sel_id];
-    sel->last_targets_req = NULL;
+    c->selections[sel_id].last_targets_req = NULL;
 
-    if (atoms == NULL)
-        return;
-
-    for (type = 0; type < TYPE_COUNT; type++)
-        sel->targets[type] = GDK_NONE;
-
-    n_types = 0;
-    for (a = 0; a < n_atoms; a++) {
-        type = get_type_from_atom(atoms[a]);
-        if (type == VD_AGENT_CLIPBOARD_NONE || sel->targets[type] != GDK_NONE)
-            continue;
-
-        sel->targets[type] = atoms[a];
-        types[n_types] = type;
-        n_types++;
-    }
-
-    if (n_types == 0) {
-        syslog(LOG_WARNING, "%s: sel_id=%u: no target supported", __func__, sel_id);
-        return;
-    }
-
-    clipboard_new_owner(c, sel_id, OWNER_GUEST);
-
-    udscs_write(c->conn, VDAGENTD_CLIPBOARD_GRAB, sel_id, 0,
-                (guint8 *)types, n_types * sizeof(guint32));
+    if (send_grab(c, sel_id, atoms, n_atoms))
+        clipboard_new_owner(c, sel_id, OWNER_GUEST);
 }
 
 static void clipboard_owner_change_cb(GtkClipboard        *clipboard,
@@ -211,7 +259,7 @@ static void clipboard_owner_change_cb(GtkClipboard        *clipboard,
 
     if (sel->owner == OWNER_GUEST) {
         clipboard_new_owner(c, sel_id, OWNER_NONE);
-        udscs_write(c->conn, VDAGENTD_CLIPBOARD_RELEASE, sel_id, 0, NULL, 0);
+        send_release(c, sel_id);
     }
 
     if (event->reason != GDK_OWNER_CHANGE_NEW_OWNER)
@@ -234,24 +282,29 @@ static void clipboard_contents_received_cb(GtkClipboard     *clipboard,
         return;
 
     VDAgentClipboards *c = request_ref_free(user_data);
-    guint sel_id, type, target;
+    guint sel_id;
+    GdkAtom target, type;
 
     sel_id = sel_id_from_clip(clipboard);
     c->selections[sel_id].requests_from_client =
         g_list_remove(c->selections[sel_id].requests_from_client, user_data);
 
-    type = get_type_from_atom(gtk_selection_data_get_data_type(sel_data));
-    target = get_type_from_atom(gtk_selection_data_get_target(sel_data));
-
-    if (type == target) {
-        udscs_write(c->conn, VDAGENTD_CLIPBOARD_DATA, sel_id, type,
-                    gtk_selection_data_get_data(sel_data),
-                    gtk_selection_data_get_length(sel_data));
+    target = gtk_selection_data_get_target(sel_data);
+    type   = gtk_selection_data_get_data_type(sel_data);
+    if (target == type) {
+        send_data(c, sel_id, type,
+                  gtk_selection_data_get_format(sel_data),
+                  gtk_selection_data_get_data(sel_data),
+                  gtk_selection_data_get_length(sel_data));
     } else {
-        syslog(LOG_WARNING, "%s: sel_id=%u: expected type %u, recieved %u, "
-                            "skipping", __func__, sel_id, target, type);
-        udscs_write(c->conn, VDAGENTD_CLIPBOARD_DATA, sel_id,
-                    VD_AGENT_CLIPBOARD_NONE, NULL, 0);
+        gchar *target_str, *type_str;
+        target_str = gdk_atom_name(target);
+        type_str   = gdk_atom_name(type);
+        syslog(LOG_WARNING, "%s: sel_id=%u: expected type %s, recieved %s, "
+                            "skipping", __func__, sel_id, target_str, type_str);
+        g_free(target_str);
+        g_free(type_str);
+        send_data(c, sel_id, GDK_NONE, 8, NULL, 0);
     }
 }
 
@@ -262,20 +315,18 @@ static void clipboard_get_cb(GtkClipboard     *clipboard,
 {
     AppRequest req;
     VDAgentClipboards *c = user_data;
-    guint sel_id, type;
+    guint sel_id;
 
     sel_id = sel_id_from_clip(clipboard);
     g_return_if_fail(c->selections[sel_id].owner == OWNER_CLIENT);
 
-    type = get_type_from_atom(gtk_selection_data_get_target(sel_data));
-    g_return_if_fail(type != VD_AGENT_CLIPBOARD_NONE);
+    if (!send_request(c, sel_id, gtk_selection_data_get_target(sel_data)))
+        return;
 
     req.sel_data = sel_data;
     req.loop = g_main_loop_new(NULL, FALSE);
     c->selections[sel_id].requests_from_apps =
         g_list_prepend(c->selections[sel_id].requests_from_apps, &req);
-
-    udscs_write(c->conn, VDAGENTD_CLIPBOARD_REQUEST, sel_id, type, NULL, 0);
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     gdk_threads_leave();
@@ -370,8 +421,8 @@ void vdagent_clipboards_release_all(VDAgentClipboards *c)
         clipboard_new_owner(c, sel_id, OWNER_NONE);
         if (owner == OWNER_CLIENT)
             gtk_clipboard_clear(c->selections[sel_id].clipboard);
-        else if (owner == OWNER_GUEST && c->conn)
-            udscs_write(c->conn, VDAGENTD_CLIPBOARD_RELEASE, sel_id, 0, NULL, 0);
+        else if (owner == OWNER_GUEST)
+            send_release(c, sel_id);
     }
 }
 
@@ -399,8 +450,7 @@ void vdagent_clipboard_request(VDAgentClipboards *c, guint sel_id, guint type)
                                    clipboard_contents_received_cb, ref);
     return;
 err:
-    udscs_write(c->conn, VDAGENTD_CLIPBOARD_DATA, sel_id,
-                VD_AGENT_CLIPBOARD_NONE, NULL, 0);
+    send_data(c, sel_id, GDK_NONE, 8, NULL, 0);
 }
 
 void vdagent_clipboards_set_protocol(VDAgentClipboards *c, guint protocol)
