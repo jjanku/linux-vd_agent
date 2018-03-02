@@ -80,6 +80,7 @@ static int quit = 0;
 static int retval = 0;
 static int client_connected = 0;
 static int max_clipboard = -1;
+static guint clipboard_protocol = CLIPBOARD_PROTOCOL_COMPATIBILITY;
 
 /* utility functions */
 static void virtio_msg_uint32_to_le(uint8_t *_msg, uint32_t size, uint32_t offset)
@@ -134,6 +135,7 @@ static void send_capabilities(struct vdagent_virtio_port *vport,
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_GUEST_LINEEND_LF);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MAX_CLIPBOARD);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_AUDIO_VOLUME_SYNC);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_SELECTION_DATA);
     virtio_msg_uint32_to_le((uint8_t *)caps, size, 0);
 
     vdagent_virtio_port_write(vport, VDP_CLIENT_PORT,
@@ -226,6 +228,20 @@ static void do_client_volume_sync(struct vdagent_virtio_port *vport, int port_nr
                 (uint8_t *)avs, message_header->size);
 }
 
+static void agent_set_clipboard_protocol()
+{
+    if (active_session_conn == NULL || !client_connected)
+        return;
+
+    clipboard_protocol = VD_AGENT_HAS_CAPABILITY(capabilities, capabilities_size,
+                                          VD_AGENT_CAP_SELECTION_DATA) ?
+                         CLIPBOARD_PROTOCOL_SELECTION :
+                         CLIPBOARD_PROTOCOL_COMPATIBILITY;
+
+    udscs_write(active_session_conn, VDAGENTD_CLIPBOARD_PROTOCOL,
+                clipboard_protocol, 0, NULL, 0);
+}
+
 static void do_client_capabilities(struct vdagent_virtio_port *vport,
     VDAgentMessage *message_header,
     VDAgentAnnounceCapabilities *caps)
@@ -250,6 +266,7 @@ static void do_client_capabilities(struct vdagent_virtio_port *vport,
             syslog(LOG_DEBUG, "New client connected");
         client_connected = 1;
         send_capabilities(vport, 0);
+        agent_set_clipboard_protocol();
     }
 }
 
@@ -303,6 +320,62 @@ static void do_client_clipboard(struct vdagent_virtio_port *vport,
 
     udscs_write(active_session_conn, msg_type, selection, data_type,
                 data, size);
+}
+
+static void do_client_selection(struct vdagent_virtio_port *vport,
+                                VDAgentMessage             *msg_header,
+                                const gpointer              msg_data)
+{
+    uint32_t msg_type, arg2, size;
+    uint8_t selection, *data;
+
+    if (!active_session_conn) {
+        syslog(LOG_WARNING,
+               "Could not find an agent connection belonging to the "
+               "active session, ignoring selection message from client");
+        return;
+    }
+
+    selection = ((uint8_t *)msg_data)[0];
+    size = msg_header->size;
+    arg2 = 0;
+
+    switch (msg_header->type) {
+    case VD_AGENT_SELECTION_GRAB: {
+        msg_type = VDAGENTD_SELECTION_GRAB;
+
+        VDAgentSelectionGrab *msg = msg_data;
+        data = msg->targets;
+        size -= sizeof(VDAgentSelectionGrab);
+
+        agent_owns_clipboard[selection] = FALSE;
+        break;
+    }
+    case VD_AGENT_SELECTION_REQUEST: {
+        msg_type = VDAGENTD_SELECTION_REQUEST;
+
+        VDAgentSelectionRequest *msg = msg_data;
+        data = msg->target;
+        size -= sizeof(VDAgentSelectionRequest);
+        break;
+    }
+    case VD_AGENT_SELECTION_DATA: {
+        msg_type = VDAGENTD_SELECTION_DATA;
+
+        VDAgentSelectionData *msg = msg_data;
+        data = msg->data;
+        size -= sizeof(VDAgentSelectionData);
+        arg2 = GINT32_FROM_LE(msg->format);
+        break;
+    }
+    case VD_AGENT_SELECTION_RELEASE:
+        msg_type = VDAGENTD_SELECTION_RELEASE;
+        data = NULL;
+        size = 0;
+        break;
+    }
+
+    udscs_write(active_session_conn, msg_type, selection, arg2, data, size);
 }
 
 /* Send file-xfer status to the client. In the case status is an error,
@@ -410,6 +483,10 @@ static gsize vdagent_message_min_size[] =
     0, /* VD_AGENT_CLIENT_DISCONNECTED */
     sizeof(VDAgentMaxClipboard), /* VD_AGENT_MAX_CLIPBOARD */
     sizeof(VDAgentAudioVolumeSync), /* VD_AGENT_AUDIO_VOLUME_SYNC */
+    sizeof(VDAgentSelectionGrab), /* VD_AGENT_SELECTION_GRAB */
+    sizeof(VDAgentSelectionRequest), /* VD_AGENT_SELECTION_REQUEST */
+    sizeof(VDAgentSelectionData), /* VD_AGENT_SELECTION_DATA */
+    sizeof(VDAgentSelectionRelease), /* VD_AGENT_SELECTION_RELEASE */
 };
 
 static void vdagent_message_clipboard_from_le(VDAgentMessage *message_header,
@@ -494,6 +571,9 @@ static gboolean vdagent_message_check_size(const VDAgentMessage *message_header)
     case VD_AGENT_CLIPBOARD_GRAB:
     case VD_AGENT_AUDIO_VOLUME_SYNC:
     case VD_AGENT_ANNOUNCE_CAPABILITIES:
+    case VD_AGENT_SELECTION_GRAB:
+    case VD_AGENT_SELECTION_REQUEST:
+    case VD_AGENT_SELECTION_DATA:
         if (message_header->size < min_size) {
             syslog(LOG_ERR, "read: invalid message size: %u for message type: %u",
                    message_header->size, message_header->type);
@@ -508,6 +588,7 @@ static gboolean vdagent_message_check_size(const VDAgentMessage *message_header)
     case VD_AGENT_CLIPBOARD_RELEASE:
     case VD_AGENT_MAX_CLIPBOARD:
     case VD_AGENT_CLIENT_DISCONNECTED:
+    case VD_AGENT_SELECTION_RELEASE:
         if (message_header->size != min_size) {
             syslog(LOG_ERR, "read: invalid message size: %u for message type: %u",
                    message_header->size, message_header->type);
@@ -551,6 +632,12 @@ static int virtio_port_read_complete(
     case VD_AGENT_CLIPBOARD_RELEASE:
         vdagent_message_clipboard_from_le(message_header, data);
         do_client_clipboard(vport, message_header, data);
+        break;
+    case VD_AGENT_SELECTION_GRAB:
+    case VD_AGENT_SELECTION_REQUEST:
+    case VD_AGENT_SELECTION_DATA:
+    case VD_AGENT_SELECTION_RELEASE:
+        do_client_selection(vport, message_header, data);
         break;
     case VD_AGENT_FILE_XFER_START:
     case VD_AGENT_FILE_XFER_STATUS:
@@ -692,6 +779,84 @@ error:
     return 0;
 }
 
+/* vdagentd <-> vdagent communication handling */
+static void do_agent_selection(struct udscs_connection     *conn,
+                               struct udscs_message_header *header,
+                               uint8_t                     *data)
+{
+    uint8_t selection;
+    uint32_t msg_type, msg_size, data_size, type_size;
+    int32_t format;
+
+    selection = header->arg1;
+    data_size = header->size;
+    msg_size  = sizeof(uint8_t) + data_size;
+
+    if (conn != active_session_conn) {
+        if (debug)
+            syslog(LOG_DEBUG, "%p selection message from agent which is not in "
+                              "the active session?", conn);
+        goto error;
+    }
+    if (virtio_port == NULL) {
+        syslog(LOG_ERR, "Selection message from agent but no client connection");
+        goto error;
+    }
+    if (header->type != VDAGENTD_SELECTION_RELEASE && data_size == 0) {
+        syslog(LOG_ERR, "Selection message incomplete, discarding");
+        goto error;
+    }
+
+    switch (header->type) {
+    case VDAGENTD_SELECTION_GRAB:
+        msg_type = VD_AGENT_SELECTION_GRAB;
+        agent_owns_clipboard[selection] = TRUE;
+        break;
+    case VDAGENTD_SELECTION_REQUEST:
+        msg_type = VD_AGENT_SELECTION_REQUEST;
+        break;
+    case VDAGENTD_SELECTION_DATA:
+        msg_type = VD_AGENT_SELECTION_DATA;
+        format = GINT32_TO_LE(header->arg2);
+        msg_size += sizeof(int32_t);
+
+        type_size = strnlen((gchar *)data, data_size - 1) + 1;
+        if (max_clipboard != -1 && data_size - type_size > max_clipboard) {
+            syslog(LOG_WARNING, "Selection data is too large (%d > %d), discarding",
+                                data_size - type_size, max_clipboard);
+            /* discard the actual data, keep the prefixed MIME type */
+            data_size = type_size;
+            msg_size = sizeof(uint8_t) + sizeof(int32_t) + type_size;
+        }
+        break;
+    case VDAGENTD_SELECTION_RELEASE:
+        msg_type = VD_AGENT_SELECTION_RELEASE;
+        agent_owns_clipboard[selection] = FALSE;
+        break;
+    }
+
+    vdagent_virtio_port_write_start(virtio_port, VDP_CLIENT_PORT,
+                                    msg_type, 0, msg_size);
+    vdagent_virtio_port_write_append(virtio_port, &selection, sizeof(uint8_t));
+
+    if (msg_type == VD_AGENT_SELECTION_DATA) {
+        vdagent_virtio_port_write_append(virtio_port, (uint8_t *)&format,
+                                         sizeof(int32_t));
+    }
+    if (msg_type != VD_AGENT_SELECTION_RELEASE) {
+        vdagent_virtio_port_write_append(virtio_port, data, data_size);
+    }
+
+    return;
+
+error:
+    if (header->type == VDAGENTD_SELECTION_REQUEST && data_size != 0) {
+        /* Let the agent know no answer is coming */
+        type_size = strnlen((gchar *)data, data_size - 1) + 1;
+        udscs_write(conn, VDAGENTD_SELECTION_DATA, selection, 8, data, type_size);
+    }
+}
+
 /* When we open the vdagent virtio channel, the server automatically goes into
    client mouse mode, so we can only have the channel open when we know the
    active session resolution. This function checks that we have an agent in the
@@ -769,11 +934,15 @@ static int connection_matches_active_session(struct udscs_connection **connp,
 static void release_clipboards(void)
 {
     uint8_t sel;
+    uint32_t msg_type;
+
+    msg_type = clipboard_protocol == CLIPBOARD_PROTOCOL_SELECTION ?
+               VD_AGENT_SELECTION_RELEASE : VD_AGENT_CLIPBOARD_RELEASE;
 
     for (sel = 0; sel < VD_AGENT_CLIPBOARD_SELECTION_SECONDARY; ++sel) {
         if (agent_owns_clipboard[sel] && virtio_port) {
             vdagent_virtio_port_write(virtio_port, VDP_CLIENT_PORT,
-                                      VD_AGENT_CLIPBOARD_RELEASE, 0, &sel, 1);
+                                      msg_type, 0, &sel, 1);
         }
         agent_owns_clipboard[sel] = 0;
     }
@@ -860,6 +1029,7 @@ static void agent_connect(struct udscs_connection *conn)
     udscs_write(conn, VDAGENTD_VERSION, 0, 0,
                 (uint8_t *)VERSION, strlen(VERSION) + 1);
     update_active_session_connection(conn);
+    agent_set_clipboard_protocol();
 }
 
 static void agent_disconnect(struct udscs_connection *conn)
@@ -925,6 +1095,12 @@ static void agent_read_complete(struct udscs_connection **connp,
             udscs_destroy_connection(connp);
             return;
         }
+        break;
+    case VDAGENTD_SELECTION_GRAB:
+    case VDAGENTD_SELECTION_REQUEST:
+    case VDAGENTD_SELECTION_DATA:
+    case VDAGENTD_SELECTION_RELEASE:
+        do_agent_selection(*connp, header, data);
         break;
     case VDAGENTD_FILE_XFER_STATUS:{
         /* header->arg1 = file xfer task id, header->arg2 = file xfer status */

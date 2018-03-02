@@ -195,6 +195,21 @@ static void daemon_read_complete(struct udscs_connection **connp,
     case VDAGENTD_CLIPBOARD_PROTOCOL:
         vdagent_clipboards_set_protocol(agent->clipboards, header->arg1);
         break;
+    case VDAGENTD_SELECTION_GRAB:
+        vdagent_selection_grab(agent->clipboards, header->arg1,
+                               (gchar *)data, header->size);
+        break;
+    case VDAGENTD_SELECTION_REQUEST:
+        vdagent_selection_request(agent->clipboards, header->arg1,
+                                  (gchar *)data, header->size);
+        break;
+    case VDAGENTD_SELECTION_DATA:
+        vdagent_selection_data(agent->clipboards, header->arg1,
+                               header->arg2, data, header->size);
+        break;
+    case VDAGENTD_SELECTION_RELEASE:
+        vdagent_selection_release(agent->clipboards, header->arg1);
+        break;
     case VDAGENTD_VERSION:
         if (strcmp((char *)data, VERSION) != 0) {
             syslog(LOG_INFO, "vdagentd version mismatch: got %s expected %s",

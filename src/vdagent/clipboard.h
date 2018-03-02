@@ -42,4 +42,15 @@ void vdagent_clipboard_data(VDAgentClipboards *c, guint sel_id,
 void vdagent_clipboard_grab(VDAgentClipboards *c, guint sel_id,
                             guint32 *types, guint n_types);
 
+void vdagent_selection_grab(VDAgentClipboards *c, guint sel_id,
+                            const gchar *data, guint size);
+
+void vdagent_selection_request(VDAgentClipboards *c, guint sel_id,
+                               const gchar *target_str, guint size);
+
+void vdagent_selection_data(VDAgentClipboards *c, guint sel_id,
+                            guint format, const guchar *data, guint size);
+
+void vdagent_selection_release(VDAgentClipboards *c, guint sel_id);
+
 #endif
