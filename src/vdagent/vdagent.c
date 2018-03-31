@@ -191,6 +191,9 @@ static void daemon_read_complete(struct udscs_connection **connp,
     case VDAGENTD_CLIPBOARD_RELEASE:
         vdagent_clipboard_release(agent->clipboards, header->arg1);
         break;
+    case VDAGENTD_CLIPBOARD_PROTOCOL:
+        vdagent_clipboards_set_protocol(agent->clipboards, header->arg1);
+        break;
     case VDAGENTD_VERSION:
         if (strcmp((char *)data, VERSION) != 0) {
             syslog(LOG_INFO, "vdagentd version mismatch: got %s expected %s",
