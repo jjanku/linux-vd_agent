@@ -21,13 +21,11 @@
 
 #include <glib.h>
 
-#include "x11.h"
 #include "udscs.h"
 
 typedef struct VDAgentClipboards VDAgentClipboards;
 
-VDAgentClipboards *vdagent_clipboards_init(struct vdagent_x11      *x11,
-                                           struct udscs_connection *conn);
+VDAgentClipboards *vdagent_clipboards_init(struct udscs_connection *conn);
 void vdagent_clipboards_finalize(VDAgentClipboards *c, gboolean conn_alive);
 
 void vdagent_clipboard_request(VDAgentClipboards *c, guint sel_id, guint type);
