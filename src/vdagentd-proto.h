@@ -27,6 +27,18 @@
 
 #define DEFAULT_VIRTIO_PORT_PATH "/dev/virtio-ports/com.redhat.spice.0"
 
+/* vdagentd sends VDAGENTD_CLIPBOARD_PROTOCOL message to vdagent
+ * specifying the protocol to be used to transfer clipboard data.
+ * If client features VD_AGENT_CAP_SELECTION_DATA capability,
+ * CLIPBOARD_PROTOCOL_SELECTION is used.
+ */
+enum {
+    /* Use old VDAGENTD_CLIPBOARD_* messages */
+    CLIPBOARD_PROTOCOL_COMPATIBILITY,
+    /* Use new VDAGENTD_SELECTION_* messages */
+    CLIPBOARD_PROTOCOL_SELECTION
+};
+
 enum {
     VDAGENTD_GUEST_XORG_RESOLUTION, /* client -> daemon, arg1: overall width,
                                        arg2: overall height, data: array of
@@ -37,6 +49,11 @@ enum {
     VDAGENTD_CLIPBOARD_REQUEST, /* arg1: selection, arg 2 = type */
     VDAGENTD_CLIPBOARD_DATA,    /* arg1: sel, arg 2: type, data: data */
     VDAGENTD_CLIPBOARD_RELEASE, /* arg1: selection */
+    VDAGENTD_CLIPBOARD_PROTOCOL,/* daemon -> client, arg1: CLIPBOARD_PROTOCOL_* */
+    VDAGENTD_SELECTION_GRAB,    /* arg1: sel, data: list of targets */
+    VDAGENTD_SELECTION_REQUEST, /* arg1: sel, data: target */
+    VDAGENTD_SELECTION_DATA,    /* arg1: sel, arg 2: format, data: type + NULL + data */
+    VDAGENTD_SELECTION_RELEASE, /* arg1: sel */
     VDAGENTD_VERSION,           /* daemon -> client, data: version string */
     VDAGENTD_AUDIO_VOLUME_SYNC,
     VDAGENTD_FILE_XFER_START,
