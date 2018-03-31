@@ -24,6 +24,7 @@
 #include <syslog.h>
 
 #include "vdagentd-proto.h"
+#include "vdagentd-proto-strings.h"
 #include "spice/vd_agent.h"
 
 #include "clipboard.h"
@@ -60,6 +61,7 @@ typedef struct {
 struct VDAgentClipboards {
     struct udscs_connection *conn;
     Selection                selections[SELECTION_COUNT];
+    guint                    protocol;
 };
 
 static const struct {
@@ -401,6 +403,14 @@ err:
                 VD_AGENT_CLIPBOARD_NONE, NULL, 0);
 }
 
+void vdagent_clipboards_set_protocol(VDAgentClipboards *c, guint protocol)
+{
+    g_return_if_fail(protocol <= CLIPBOARD_PROTOCOL_SELECTION);
+    c->protocol = protocol;
+    syslog(LOG_DEBUG, "Clipboard protocol set to %s",
+                      vdagentd_clipboard_protocols[protocol]);
+}
+
 VDAgentClipboards *vdagent_clipboards_init(struct udscs_connection *conn)
 {
     guint sel_id;
@@ -412,6 +422,7 @@ VDAgentClipboards *vdagent_clipboards_init(struct udscs_connection *conn)
     VDAgentClipboards *c;
     c = g_new0(VDAgentClipboards, 1);
     c->conn = conn;
+    c->protocol = CLIPBOARD_PROTOCOL_COMPATIBILITY;
 
     for (sel_id = 0; sel_id < SELECTION_COUNT; sel_id++) {
         GtkClipboard *clipboard = gtk_clipboard_get(sel_atom[sel_id]);

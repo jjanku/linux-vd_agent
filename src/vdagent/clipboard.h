@@ -28,6 +28,8 @@ typedef struct VDAgentClipboards VDAgentClipboards;
 VDAgentClipboards *vdagent_clipboards_init(struct udscs_connection *conn);
 void vdagent_clipboards_finalize(VDAgentClipboards *c, gboolean conn_alive);
 
+void vdagent_clipboards_set_protocol(VDAgentClipboards *c, guint protocol);
+
 void vdagent_clipboard_request(VDAgentClipboards *c, guint sel_id, guint type);
 
 void vdagent_clipboard_release(VDAgentClipboards *c, guint sel_id);
