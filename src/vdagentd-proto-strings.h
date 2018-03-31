@@ -22,6 +22,11 @@
 #ifndef __VDAGENTD_PROTO_STRINGS_H
 #define __VDAGENTD_PROTO_STRINGS_H
 
+static const char * const vdagentd_clipboard_protocols[] = {
+        "compatibility",
+        "selection",
+};
+
 static const char * const vdagentd_messages[] = {
         "guest xorg resolution",
         "monitors config",
@@ -29,6 +34,11 @@ static const char * const vdagentd_messages[] = {
         "clipboard request",
         "clipboard data",
         "clipboard release",
+        "clipboard protocol",
+        "selection grab",
+        "selection request",
+        "selection data",
+        "selection release",
         "version",
         "audio volume sync",
         "file xfer start",
