@@ -20,17 +20,14 @@
 # include <config.h>
 #endif
 
-#ifdef WITH_GTK
-# include <gtk/gtk.h>
-# include <syslog.h>
+#include <gtk/gtk.h>
+#include <syslog.h>
 
-# include "vdagentd-proto.h"
-# include "spice/vd_agent.h"
-#endif
+#include "vdagentd-proto.h"
+#include "spice/vd_agent.h"
 
 #include "clipboard.h"
 
-#ifdef WITH_GTK
 /* 2 selections supported - _SELECTION_CLIPBOARD = 0, _SELECTION_PRIMARY = 1 */
 #define SELECTION_COUNT (VD_AGENT_CLIPBOARD_SELECTION_PRIMARY + 1)
 #define TYPE_COUNT      (VD_AGENT_CLIPBOARD_IMAGE_JPG + 1)
@@ -59,18 +56,12 @@ typedef struct {
 
     GdkAtom       targets[TYPE_COUNT];
 } Selection;
-#endif
 
 struct VDAgentClipboards {
-#ifdef WITH_GTK
     struct udscs_connection *conn;
     Selection                selections[SELECTION_COUNT];
-#else
-    struct vdagent_x11 *x11;
-#endif
 };
 
-#ifdef WITH_GTK
 static const struct {
     guint         type;
     const gchar  *atom_name;
@@ -298,14 +289,10 @@ static void clipboard_clear_cb(GtkClipboard *clipboard, gpointer user_data)
     VDAgentClipboards *c = user_data;
     clipboard_new_owner(c, sel_id_from_clip(clipboard), OWNER_NONE);
 }
-#endif
 
 void vdagent_clipboard_grab(VDAgentClipboards *c, guint sel_id,
                             guint32 *types, guint n_types)
 {
-#ifndef WITH_GTK
-    vdagent_x11_clipboard_grab(c->x11, sel_id, types, n_types);
-#else
     GtkTargetEntry targets[G_N_ELEMENTS(atom2agent)];
     guint n_targets, i, t;
 
@@ -333,15 +320,11 @@ void vdagent_clipboard_grab(VDAgentClipboards *c, guint sel_id,
         syslog(LOG_ERR, "%s: sel_id=%u: clipboard grab failed", __func__, sel_id);
         clipboard_new_owner(c, sel_id, OWNER_NONE);
     }
-#endif
 }
 
 void vdagent_clipboard_data(VDAgentClipboards *c, guint sel_id,
                             guint type, guchar *data, guint size)
 {
-#ifndef WITH_GTK
-    vdagent_x11_clipboard_data(c->x11, sel_id, type, data, size);
-#else
     g_return_if_fail(sel_id < SELECTION_COUNT);
     Selection *sel = &c->selections[sel_id];
     AppRequest *req;
@@ -364,28 +347,20 @@ void vdagent_clipboard_data(VDAgentClipboards *c, guint sel_id,
                            8, data, size);
 
     g_main_loop_quit(req->loop);
-#endif
 }
 
 void vdagent_clipboard_release(VDAgentClipboards *c, guint sel_id)
 {
-#ifndef WITH_GTK
-    vdagent_x11_clipboard_release(c->x11, sel_id);
-#else
     g_return_if_fail(sel_id < SELECTION_COUNT);
     if (c->selections[sel_id].owner != OWNER_CLIENT)
         return;
 
     clipboard_new_owner(c, sel_id, OWNER_NONE);
     gtk_clipboard_clear(c->selections[sel_id].clipboard);
-#endif
 }
 
 void vdagent_clipboards_release_all(VDAgentClipboards *c)
 {
-#ifndef WITH_GTK
-    vdagent_x11_client_disconnected(c->x11);
-#else
     guint sel_id, owner;
 
     for (sel_id = 0; sel_id < SELECTION_COUNT; sel_id++) {
@@ -396,14 +371,10 @@ void vdagent_clipboards_release_all(VDAgentClipboards *c)
         else if (owner == OWNER_GUEST && c->conn)
             udscs_write(c->conn, VDAGENTD_CLIPBOARD_RELEASE, sel_id, 0, NULL, 0);
     }
-#endif
 }
 
 void vdagent_clipboard_request(VDAgentClipboards *c, guint sel_id, guint type)
 {
-#ifndef WITH_GTK
-    vdagent_x11_clipboard_request(c->x11, sel_id, type);
-#else
     Selection *sel;
 
     if (sel_id >= SELECTION_COUNT)
@@ -428,25 +399,18 @@ void vdagent_clipboard_request(VDAgentClipboards *c, guint sel_id, guint type)
 err:
     udscs_write(c->conn, VDAGENTD_CLIPBOARD_DATA, sel_id,
                 VD_AGENT_CLIPBOARD_NONE, NULL, 0);
-#endif
 }
 
-VDAgentClipboards *vdagent_clipboards_init(struct vdagent_x11      *x11,
-                                           struct udscs_connection *conn)
+VDAgentClipboards *vdagent_clipboards_init(struct udscs_connection *conn)
 {
-#ifdef WITH_GTK
     guint sel_id;
     const GdkAtom sel_atom[SELECTION_COUNT] = {
         GDK_SELECTION_CLIPBOARD, /* VD_AGENT_CLIPBOARD_SELECTION_CLIPBOARD */
         GDK_SELECTION_PRIMARY,   /* VD_AGENT_CLIPBOARD_SELECTION_PRIMARY */
     };
-#endif
 
     VDAgentClipboards *c;
     c = g_new0(VDAgentClipboards, 1);
-#ifndef WITH_GTK
-    c->x11 = x11;
-#else
     c->conn = conn;
 
     for (sel_id = 0; sel_id < SELECTION_COUNT; sel_id++) {
@@ -458,14 +422,12 @@ VDAgentClipboards *vdagent_clipboards_init(struct vdagent_x11      *x11,
         g_signal_connect(G_OBJECT(clipboard), "owner-change",
                          G_CALLBACK(clipboard_owner_change_cb), c);
     }
-#endif
 
     return c;
 }
 
 void vdagent_clipboards_finalize(VDAgentClipboards *c, gboolean conn_alive)
 {
-#ifdef WITH_GTK
     guint sel_id;
     for (sel_id = 0; sel_id < SELECTION_COUNT; sel_id++)
         g_signal_handlers_disconnect_by_func(c->selections[sel_id].clipboard,
@@ -474,7 +436,6 @@ void vdagent_clipboards_finalize(VDAgentClipboards *c, gboolean conn_alive)
     if (conn_alive == FALSE)
         c->conn = NULL;
     vdagent_clipboards_release_all(c);
-#endif
 
     g_free(c);
 }

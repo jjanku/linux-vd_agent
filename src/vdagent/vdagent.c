@@ -36,9 +36,7 @@
 #include <spice/vd_agent.h>
 #include <poll.h>
 #include <glib-unix.h>
-#ifdef WITH_GTK
-# include <gtk/gtk.h>
-#endif
+#include <gtk/gtk.h>
 
 #include "udscs.h"
 #include "vdagentd-proto.h"
@@ -112,7 +110,7 @@ static const gchar *xfer_get_download_directory(VDAgent *agent)
         return fx_dir;
     }
 
-    return g_get_user_special_dir(vdagent_x11_has_icons_on_desktop(agent->x11) ?
+    return g_get_user_special_dir(vdagent_x11_has_icons_on_desktop() ?
                                   G_USER_DIRECTORY_DESKTOP :
                                   G_USER_DIRECTORY_DOWNLOAD);
 }
@@ -142,7 +140,7 @@ static gboolean vdagent_init_file_xfer(VDAgent *agent)
     }
 
     open_dir = fx_open_dir == -1 ?
-               !vdagent_x11_has_icons_on_desktop(agent->x11) :
+               !vdagent_x11_has_icons_on_desktop() :
                fx_open_dir;
 
     agent->xfers = vdagent_file_xfers_create(agent->conn, xfer_dir,
@@ -390,7 +388,7 @@ static gboolean vdagent_init_async_cb(gpointer user_data)
     if (!vdagent_init_file_xfer(agent))
         syslog(LOG_WARNING, "File transfer is disabled");
 
-    agent->clipboards = vdagent_clipboards_init(agent->x11, agent->conn);
+    agent->clipboards = vdagent_clipboards_init(agent->conn);
 
     if (parent_socket != -1) {
         if (write(parent_socket, "OK", 2) != 2)
@@ -418,9 +416,7 @@ int main(int argc, char *argv[])
     g_option_context_set_summary(context,
                                  "\tSpice session guest agent: X11\n"
                                  "\tVersion: " VERSION);
-#ifdef WITH_GTK
     g_option_context_add_group(context, gtk_get_option_group(FALSE));
-#endif
     g_option_context_parse(context, &argc, &argv, &error);
     g_option_context_free(context);
 
@@ -450,10 +446,8 @@ int main(int argc, char *argv[])
 
     syslog(LOG_INFO, "vdagent started");
 
-#ifdef WITH_GTK
     gdk_set_allowed_backends("x11");
     gtk_init(NULL, NULL);
-#endif
 
 reconnect:
     if (version_mismatch) {
