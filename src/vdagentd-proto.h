@@ -61,6 +61,7 @@ enum {
     VDAGENTD_FILE_XFER_DATA,
     VDAGENTD_FILE_XFER_DISABLE,
     VDAGENTD_CLIENT_DISCONNECTED,  /* daemon -> client */
+    VDAGENTD_DND_STATUS,
     VDAGENTD_NO_MESSAGES /* Must always be last */
 };
 

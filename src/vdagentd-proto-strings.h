@@ -46,6 +46,7 @@ static const char * const vdagentd_messages[] = {
         "file xfer data",
         "file xfer disable",
         "client disconnected",
+        "dnd status",
 };
 
 #endif

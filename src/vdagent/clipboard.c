@@ -62,6 +62,11 @@ typedef struct {
 struct VDAgentClipboards {
     struct udscs_connection *conn;
     Selection                selections[SELECTION_COUNT];
+
+    GdkDragContext          *drag_context;
+    GList                   *drag_requests_from_apps;
+    GtkWidget               *drag_icon;
+
     guint                    protocol;
 };
 
@@ -434,6 +439,115 @@ void clipboard_grab(VDAgentClipboards *c, guint sel_id,
     }
 }
 
+static void drag_data_get_cb(GtkWidget        *widget,
+                             GdkDragContext   *drag_context,
+                             GtkSelectionData *sel_data,
+                             guint             info,
+                             guint             time,
+                             gpointer          user_data)
+{
+    VDAgentClipboards *c = user_data;
+    AppRequest req;
+
+    g_message("drag data get");
+
+    send_request(c, VD_AGENT_DND_SELECTION,
+                 gtk_selection_data_get_target(sel_data));
+
+    req.sel_data = sel_data;
+    req.loop = g_main_loop_new(NULL, FALSE);
+    c->drag_requests_from_apps = g_list_prepend(c->drag_requests_from_apps, &req);
+
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    gdk_threads_leave();
+    g_main_loop_run(req.loop);
+    gdk_threads_enter();
+G_GNUC_END_IGNORE_DEPRECATIONS
+
+    g_main_loop_unref(req.loop);
+}
+
+static void drag_data_delete_cb(GtkWidget        *widget,
+                                GdkDragContext   *drag_context,
+                                gpointer          user_data)
+{
+    g_message("dnd data delete");
+}
+
+static void drag_end(VDAgentClipboards *c, GtkWidget *source, guint status)
+{
+    gtk_widget_destroy(source);
+    gtk_widget_destroy(c->drag_icon);
+    c->drag_context = NULL;
+    c->drag_icon = NULL;
+
+    udscs_write(c->conn, VDAGENTD_DND_STATUS, status, 0, NULL, 0);
+}
+static void drag_end_cb(GtkWidget      *source,
+                        GdkDragContext *drag_context,
+                        gpointer        user_data)
+{
+    g_message("dnd end");
+    drag_end(user_data, source, VD_AGENT_DND_STATUS_DROP_SUCCESS);
+}
+
+static gboolean drag_failed_cb(GtkWidget      *source,
+                               GdkDragContext *drag_context,
+                               GtkDragResult   result,
+                               gpointer        user_data)
+{
+    g_message("drag failed, result=%u", result);
+    drag_end(user_data, source, VD_AGENT_DND_STATUS_DROP_FAILED);
+
+    /* Return TRUE to avoid animation of icon returning to
+     * the starting position of drag, since the actual starting point
+     * lies in another window on the client system. */
+    return TRUE;
+}
+
+static void drag_begin(VDAgentClipboards *c,
+                       GtkTargetEntry    *targets,
+                       guint              n_targets)
+{
+    GtkTargetList *list;
+    GtkWidget *source;
+    guint status;
+
+    list = gtk_target_list_new(targets, n_targets);
+    source = gtk_invisible_new();
+
+    g_signal_connect(source, "drag-data-get", G_CALLBACK(drag_data_get_cb), c);
+    g_signal_connect(source, "drag-data-delete", G_CALLBACK(drag_data_delete_cb), c);
+    g_signal_connect(source, "drag-failed", G_CALLBACK(drag_failed_cb), c);
+    g_signal_connect(source, "drag-end", G_CALLBACK(drag_end_cb), c);
+
+    /* FIXME: allow dnd with other than primary button, can we pass a real event? */
+    c->drag_context =
+        gtk_drag_begin_with_coordinates(source, list, GDK_ACTION_COPY,
+                                        GDK_BUTTON_PRIMARY, NULL, -1, -1);
+    gtk_target_list_unref(list);
+
+    if (c->drag_context) {
+        status = VD_AGENT_DND_STATUS_BEGIN_SUCCESS;
+        /* drag icon is rendered on the client side */
+        c->drag_icon = gtk_image_new();
+        gtk_image_clear(GTK_IMAGE(c->drag_icon));
+        gtk_drag_set_icon_widget(c->drag_context, c->drag_icon, 0, 0);
+    } else {
+        g_warning("drag begin failed");
+        status = VD_AGENT_DND_STATUS_BEGIN_ERROR;
+    }
+    udscs_write(c->conn, VDAGENTD_DND_STATUS, status, 0, NULL, 0);
+}
+
+static void drag_cancel(VDAgentClipboards *c)
+{
+    /* FIXME: requires GTK+ v3.16 */
+    g_message("drag cancel");
+    g_return_if_fail(c->drag_context != NULL);
+    gtk_drag_cancel(c->drag_context);
+}
+
 void vdagent_clipboard_grab(VDAgentClipboards *c, guint sel_id,
                             guint32 *types, guint n_types)
 {
@@ -465,7 +579,8 @@ void vdagent_selection_grab(VDAgentClipboards *c, guint sel_id,
     GtkTargetEntry *targets;
     guint i, n, n_targets = 0;
 
-    g_return_if_fail(sel_id < SELECTION_COUNT);
+    g_return_if_fail(sel_id < SELECTION_COUNT ||
+                     sel_id == VD_AGENT_DND_SELECTION);
 
     g_return_if_fail(size >= 2);
     g_return_if_fail(data[0] != 0);
@@ -486,7 +601,10 @@ void vdagent_selection_grab(VDAgentClipboards *c, guint sel_id,
         } else
             n++;
 
-    clipboard_grab(c, sel_id, targets, n_targets);
+    if (sel_id == VD_AGENT_DND_SELECTION)
+        drag_begin(c, targets, n_targets);
+    else
+        clipboard_grab(c, sel_id, targets, n_targets);
     g_free(targets);
 }
 
@@ -494,12 +612,19 @@ void selection_data_set(VDAgentClipboards *c, guint sel_id,
                         GdkAtom type, gint type_vdagent,
                         gint format, const guchar *data, guint size)
 {
-    g_return_if_fail(sel_id < SELECTION_COUNT);
-    Selection *sel = &c->selections[sel_id];
+    g_return_if_fail(sel_id < SELECTION_COUNT ||
+                     sel_id == VD_AGENT_DND_SELECTION);
+    Selection *sel;
     AppRequest *req;
-    GList *l;
+    GList **list, *l;
 
-    for (l = sel->requests_from_apps; l != NULL; l = l->next) {
+    if (sel_id == VD_AGENT_DND_SELECTION) {
+        list = &c->drag_requests_from_apps;
+    } else {
+        sel = &c->selections[sel_id];
+        list = &sel->requests_from_apps;
+    }
+    for (l = *list; l != NULL; l = l->next) {
         req = l->data;
         GdkAtom target = gtk_selection_data_get_target(req->sel_data);
         if (target == type || get_type_from_atom(target) == type_vdagent)
@@ -513,7 +638,7 @@ void selection_data_set(VDAgentClipboards *c, guint sel_id,
         g_free(type_name);
         return;
     }
-    sel->requests_from_apps = g_list_delete_link(sel->requests_from_apps, l);
+    *list = g_list_delete_link(*list, l);
 
     gtk_selection_data_set(req->sel_data,
                            gtk_selection_data_get_target(req->sel_data),
@@ -556,7 +681,10 @@ void vdagent_clipboard_release(VDAgentClipboards *c, guint sel_id)
 
 void vdagent_selection_release(VDAgentClipboards *c, guint sel_id)
 {
-    vdagent_clipboard_release(c, sel_id);
+    if (sel_id == VD_AGENT_DND_SELECTION)
+        drag_cancel(c);
+    else
+        vdagent_clipboard_release(c, sel_id);
 }
 
 void vdagent_clipboards_release_all(VDAgentClipboards *c)
@@ -670,6 +798,7 @@ void vdagent_clipboards_finalize(VDAgentClipboards *c, gboolean conn_alive)
     if (conn_alive == FALSE)
         c->conn = NULL;
     vdagent_clipboards_release_all(c);
+    /* FIXME: release dnd */
 
     g_free(c);
 }

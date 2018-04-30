@@ -136,6 +136,7 @@ static void send_capabilities(struct vdagent_virtio_port *vport,
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_MAX_CLIPBOARD);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_AUDIO_VOLUME_SYNC);
     VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_SELECTION_DATA);
+    VD_AGENT_SET_CAPABILITY(caps->caps, VD_AGENT_CAP_DND);
     virtio_msg_uint32_to_le((uint8_t *)caps, size, 0);
 
     vdagent_virtio_port_write(vport, VDP_CLIENT_PORT,
@@ -487,6 +488,7 @@ static gsize vdagent_message_min_size[] =
     sizeof(VDAgentSelectionRequest), /* VD_AGENT_SELECTION_REQUEST */
     sizeof(VDAgentSelectionData), /* VD_AGENT_SELECTION_DATA */
     sizeof(VDAgentSelectionRelease), /* VD_AGENT_SELECTION_RELEASE */
+    sizeof(VDAgentDNDStatusMessage), /* VD_AGENT_DND_STATUS */
 };
 
 static void vdagent_message_clipboard_from_le(VDAgentMessage *message_header,
@@ -589,6 +591,7 @@ static gboolean vdagent_message_check_size(const VDAgentMessage *message_header)
     case VD_AGENT_MAX_CLIPBOARD:
     case VD_AGENT_CLIENT_DISCONNECTED:
     case VD_AGENT_SELECTION_RELEASE:
+    case VD_AGENT_DND_STATUS:
         if (message_header->size != min_size) {
             syslog(LOG_ERR, "read: invalid message size: %u for message type: %u",
                    message_header->size, message_header->type);
@@ -1125,6 +1128,14 @@ static void agent_read_complete(struct udscs_connection **connp,
                                 *connp);
         else
             g_hash_table_remove(active_xfers, GUINT_TO_POINTER(GUINT32_TO_LE(header->arg1)));
+        break;
+    }
+    case VDAGENTD_DND_STATUS: {
+        VDAgentDNDStatusMessage msg;
+        msg.status = GUINT32_TO_LE(header->arg1);
+        vdagent_virtio_port_write(virtio_port, VDP_CLIENT_PORT,
+                                  VD_AGENT_DND_STATUS, 0,
+                                  (uint8_t *)&msg, sizeof(msg));
         break;
     }
 
