@@ -1,9 +1,6 @@
-/*  vdagentd-proto-strings.h header file
+/*  notifications.h
 
-    Copyright 2010-2013 Red Hat, Inc.
-
-    Red Hat Authors:
-    Hans de Goede <hdegoede@redhat.com>
+    Copyright 2018 Red Hat, Inc.
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,24 +16,14 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef __VDAGENTD_PROTO_STRINGS_H
-#define __VDAGENTD_PROTO_STRINGS_H
-
-static const char * const vdagentd_messages[] = {
-        "guest xorg resolution",
-        "monitors config",
-        "clipboard grab",
-        "clipboard request",
-        "clipboard data",
-        "clipboard release",
-        "version",
-        "audio volume sync",
-        "file xfer start",
-        "file xfer status",
-        "file xfer data",
-        "file xfer disable",
-        "guest notification",
-        "client disconnected",
-};
-
+#ifdef HAVE_CONFIG_H
+#include <config.h>
 #endif
+
+#include "udscs.h"
+
+typedef struct VDAgentNotifications VDAgentNotifications;
+
+VDAgentNotifications *vdagent_notifications_init(struct udscs_connection *udscs);
+
+void vdagent_notifications_finalize(VDAgentNotifications *n);

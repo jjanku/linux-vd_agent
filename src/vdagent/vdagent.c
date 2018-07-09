@@ -47,9 +47,11 @@
 #include "x11.h"
 #include "file-xfers.h"
 #include "clipboard.h"
+#include "notifications.h"
 
 typedef struct VDAgent {
     VDAgentClipboards *clipboards;
+    VDAgentNotifications *notifications;
     struct vdagent_x11 *x11;
     struct vdagent_file_xfers *xfers;
     struct udscs_connection *conn;
@@ -353,6 +355,8 @@ static void vdagent_destroy(VDAgent *agent)
 {
     vdagent_finalize_file_xfer(agent);
     vdagent_x11_destroy(agent->x11, agent->conn == NULL);
+    if (agent->notifications)
+        vdagent_notifications_finalize(agent->notifications);
     udscs_destroy_connection(&agent->conn);
 
     while (g_source_remove_by_user_data(agent))
@@ -399,6 +403,8 @@ static gboolean vdagent_init_async_cb(gpointer user_data)
         close(parent_socket);
         parent_socket = -1;
     }
+
+    agent->notifications = vdagent_notifications_init(agent->conn);
 
     return G_SOURCE_REMOVE;
 

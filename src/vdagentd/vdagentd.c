@@ -951,6 +951,12 @@ static void agent_read_complete(struct udscs_connection **connp,
             g_hash_table_remove(active_xfers, GUINT_TO_POINTER(GUINT32_TO_LE(header->arg1)));
         break;
     }
+    case VDAGENTD_GUEST_NOTIFICATION:
+        if (VD_AGENT_HAS_CAPABILITY(capabilities, capabilities_size,
+                                    VD_AGENT_CAP_GUEST_NOTIFICATIONS))
+            vdagent_virtio_port_write(virtio_port, VDP_CLIENT_PORT,
+                VD_AGENT_GUEST_NOTIFICATION, 0, data, header->size);
+        break;
 
     default:
         syslog(LOG_ERR, "unknown message from vdagent: %u, ignoring",
